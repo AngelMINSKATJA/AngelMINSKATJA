@@ -110,7 +110,9 @@ def _pomper(app, condition, delai=30.0):
 
 
 def _deposer(app, *chemins):
-    donnee = " ".join("{%s}" % c if " " in str(c) else str(c) for c in chemins)
+    # tkdnd fournit des chemins avec « / » (même sous Windows) : les « \\ » seraient pris pour des échappements Tcl
+    chemins = [pathlib.Path(c).as_posix() for c in chemins]
+    donnee = " ".join("{%s}" % c if " " in c else c for c in chemins)
     app._on_drop(SimpleNamespace(data=donnee, action="copy"))
 
 
