@@ -34,9 +34,13 @@ jobs:
       - name: Tests
         run: python -m pytest -q
 
+      - name: Numéro de version (affiché dans la fenêtre)
+        shell: pwsh
+        run: |
+          "APLATIR_VERSION=${{ github.run_number }}-$($env:GITHUB_SHA.Substring(0, 7))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Fabriquer l'exécutable (build.py lance aussi l'auto-test)
         env:
-          APLATIR_VERSION: ${{ github.run_number }}-${{ substr(github.sha, 0, 7) }}
           APLATIR_SANS_DIALOGUE: "1"
         run: python build.py
 
