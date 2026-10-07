@@ -58,9 +58,6 @@ def test_verrou_persistant_message_acrobat_et_aucun_temporaire(tmp_path, monkeyp
 # --------------------------------------------------------------------------- #
 # WIN-3 : verrou TRANSITOIRE (antivirus, OneDrive, indexeur) sur le fichier qui vient d'être écrit
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="WIN-3: os.replace(tmp, dst) échoue de façon transitoire sous Windows quand un "
-                                       "antivirus/OneDrive/l'indexeur tient encore le fichier tout juste écrit "
-                                       "(WinError 5/32) : aucun nouvel essai, le PDF est rejeté (« ouvert dans Acrobat ? »)")
 @pytest.mark.parametrize("winerror", [5, 32])
 def test_remplacement_survit_a_un_verrou_transitoire(tmp_path, monkeypatch, winerror):
     src = _pdf(tmp_path / "a.pdf")
@@ -96,10 +93,6 @@ def _dossier_profond(base, longueur):
     return d
 
 
-@pytest.mark.xfail(strict=True, reason="WIN-4: sans LongPathsEnabled (réglage par défaut de Windows 10/11), un chemin "
-                                       "de sortie dossier + « [a]- » + nom >= 260 caractères fait échouer os.replace "
-                                       "(FileNotFoundError WinError 3/206) : l'utilisateur lit « fichier introuvable » "
-                                       "alors que le PDF existe et que le dossier de sortie existe aussi")
 def test_chemin_de_sortie_trop_long_message_clair(tmp_path, monkeypatch):
     nom = "Rapport de fin de fabrication OF 123456 indice B.pdf"           # 52 caractères
     src = _pdf(tmp_path / "entree" / nom)

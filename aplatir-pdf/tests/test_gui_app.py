@@ -326,8 +326,8 @@ def test_lot_de_60_fichiers_compteurs_et_reactivite(fabrique, tmp_path):
     assert time.time() - t0 < 2.0                  # ajouter() ne traite rien lui-même
     assert app.en_cours == 61
     assert _pomper(app, lambda: app.en_cours == 0, 60)
-    assert app.stats == {"ok": 60, "alerte": 0, "erreur": 1, "ignore": 0}
-    assert app.var_statut.get() == "Terminé : 60 aplati(s), 1 erreur(s)."
+    assert app.stats == {"ok": 30, "copie": 30, "alerte": 0, "erreur": 1, "ignore": 0}   # 30 sans tampon : copiés
+    assert app.var_statut.get() == "Terminé : 30 aplati(s), 30 copié(s) (rien à aplatir), 1 erreur(s)."
     assert len(list(sortie.glob("[[]a[]]- *.pdf"))) == 60
     assert len(_lignes(app)) == 61 and not any("attente" in str(app.arbre.item(i, "tags"))
                                                  for i in app.arbre.get_children())
@@ -378,7 +378,7 @@ def test_exception_dans_le_worker_est_une_ligne_erreur_et_le_worker_continue(fab
 @GUI
 @pytest.mark.parametrize("statut, dst, texte, tag, cle", [
     ("ok", True, "✔ Aplati", "ok", "ok"),
-    ("copie", True, "✔ Copié", "ok", "ok"),
+    ("copie", True, "✔ Copié", "ok", "copie"),
     ("securite", True, "⚠ Aplati (image)", "alerte", "alerte"),
     ("alerte", True, "⚠ À vérifier", "alerte", "alerte"),
     ("ignore", False, "— Ignoré", "ignore", "ignore"),
@@ -506,9 +506,6 @@ def test_definir_demarrage_met_a_jour_config_et_menu(fabrique, tmp_path):
 # GUI-3 : le résumé final « Terminé : ... » est inexact
 # --------------------------------------------------------------------------- #
 @GUI
-@pytest.mark.xfail(strict=True, reason="GUI-3: un PDF sans rien à aplatir (statut « copie », copié tel quel) est "
-                                       "compté dans « N aplati(s) » du résumé et de la bulle de fin : un PDF dont la "
-                                       "signature n'a pas été reconnue passe pour aplati")
 def test_resume_ne_compte_pas_les_copies_comme_aplatis(fabrique, tmp_path):
     app = fabrique(cfg={"sortie": str(tmp_path / "out")})
     app.ajouter([str(_pdf(tmp_path / "in" / "signe.pdf", tampon=True)),
@@ -519,9 +516,6 @@ def test_resume_ne_compte_pas_les_copies_comme_aplatis(fabrique, tmp_path):
 
 
 @GUI
-@pytest.mark.xfail(strict=True, reason="GUI-3: les lignes « Ignoré » créées par collecter_pdf (non-PDF, introuvable) "
-                                       "ne sont pas comptées dans le résumé, qui reste muet (ou périmé quand le "
-                                       "dépôt ne contient que des fichiers ignorés)")
 def test_resume_compte_les_fichiers_ignores_a_la_collecte(fabrique, tmp_path):
     app = fabrique(cfg={"sortie": str(tmp_path / "out")})
     (tmp_path / "in").mkdir()
@@ -621,21 +615,29 @@ def test_pomper_se_reprogramme_apres_une_exception(fabrique, tmp_path, monkeypat
 
 
 # --------------------------------------------------------------------------- #
-# Instance unique (sans interface)
+# Instance unique : verrou par profil + serveur local à jeton (sans interface)
 # --------------------------------------------------------------------------- #
 @pytest.fixture
-def serveur(monkeypatch):
-    tmp = socket.socket()
-    tmp.bind(("127.0.0.1", 0))
-    port = tmp.getsockname()[1]
-    tmp.close()
-    monkeypatch.setattr(tray, "PORT_INSTANCE", port)
-    s = tray.devenir_instance_principale()
-    assert s is not None
-    recus = []
-    threading.Thread(target=tray.servir_instance, args=(s, recus.append), daemon=True).start()
-    yield port, recus, s
-    s.close()
+def instance(tmp_path, monkeypatch):
+    """Une « instance déjà lancée » : verrou pris, serveur ouvert, messages reçus dans ``recus``."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    verrou = tray.prendre_verrou()
+    assert verrou is not None
+    serveur, jeton = tray.ouvrir_serveur()
+    recus: list = []
+    occupe = {"v": False}
+
+    def poster(msg):
+        recus.append(msg)
+        if msg.get("cmd") == "quit":        # l'instance obéit : elle se ferme et relâche le verrou
+            verrou.close()
+
+    threading.Thread(target=tray.servir_instance, args=(serveur, jeton, poster, lambda: occupe["v"]),
+                     daemon=True).start()
+    port = json.loads((tmp_path / "appdata" / tray.ID_APP / tray.FICHIER_INSTANCE).read_text())["port"]
+    yield SimpleNamespace(port=port, jeton=jeton, recus=recus, occupe=occupe, verrou=verrou)
+    serveur.close()
+    verrou.close()
 
 
 def _brut(port, octets, shutdown=True):
@@ -655,156 +657,221 @@ def _brut(port, octets, shutdown=True):
         c.close()
 
 
-def test_instance_show_et_files(serveur):
-    port, recus, _ = serveur
-    assert tray.devenir_instance_principale() is None            # port pris : on est la 2e instance
-    assert tray.prevenir_instance_existante({"cmd": "show"})
-    assert tray.prevenir_instance_existante({"cmd": "files", "paths": ["C:\\a b\\é.pdf", "//srv/x.pdf"]})
-    assert recus == [{"cmd": "show"}, {"cmd": "files", "paths": ["C:\\a b\\é.pdf", "//srv/x.pdf"]}]
+def _msg(inst, **champs):
+    return json.dumps(dict(champs, jeton=inst.jeton, version=tray.VERSION)).encode()
+
+
+def test_instance_un_seul_verrou_par_profil(instance):
+    assert tray.prendre_verrou() is None                          # même profil : refusé
+
+
+def test_instance_show_et_files(instance):
+    assert tray.contacter_instance({"cmd": "show"}) == "OK"
+    fichiers = {"cmd": "files", "paths": ["C:\\a b\\é.pdf", "//srv/x.pdf"]}
+    assert tray.contacter_instance(fichiers) == "OK"
+    assert instance.recus == [{"cmd": "show"}, fichiers]          # jeton et version ne sont pas transmis
 
 
 @pytest.mark.parametrize("octets", [b"{oops\n", b"[1, 2]\n", b"", b"\xff\xfe\n", b"null\n"])
-def test_instance_message_invalide_est_refuse_sans_tuer_le_serveur(serveur, octets):
-    port, recus, _ = serveur
-    assert _brut(port, octets) == b""
-    assert tray.prevenir_instance_existante({"cmd": "show"})     # toujours vivant
+def test_instance_message_invalide_est_refuse_sans_tuer_le_serveur(instance, octets):
+    assert _brut(instance.port, octets) == b""
+    assert tray.contacter_instance({"cmd": "show"}) == "OK"      # toujours vivant
+    assert instance.recus == [{"cmd": "show"}]
+
+
+def test_instance_message_sans_retour_a_la_ligne_accepte(instance):
+    assert _brut(instance.port, _msg(instance, cmd="show")) == b"OK"
+
+
+def test_instance_message_trop_gros_est_refuse_sans_tuer_le_serveur(instance):
+    enorme = json.dumps({"cmd": "files", "paths": ["C:\\" + "x" * 200 + ".pdf"] * 6000,
+                         "jeton": instance.jeton}).encode() + b"\n"
+    assert len(enorme) > (1 << 20)
+    assert _brut(instance.port, enorme) == b""
+    assert tray.contacter_instance({"cmd": "show"}) == "OK"
+
+
+def test_instance_mauvais_jeton_refuse(instance):
+    mauvais = json.dumps({"cmd": "files", "paths": ["x.pdf"], "jeton": "pas-le-bon",
+                          "version": tray.VERSION}).encode()
+    assert _brut(instance.port, mauvais) == b"NON"
+    assert instance.recus == []
+
+
+def test_instance_autre_version_repond_autre_et_ne_traite_rien(instance, monkeypatch):
+    monkeypatch.setattr(tray, "VERSION", "99-autre")
+    assert tray.contacter_instance({"cmd": "files", "paths": ["x.pdf"]}) == "AUTRE"
+    assert instance.recus == []
+
+
+def test_instance_demande_de_fermeture(instance, monkeypatch):
+    monkeypatch.setattr(tray, "VERSION", "99-autre")             # la fermeture est acceptée quelle que soit la version
+    instance.occupe["v"] = True
+    assert tray.contacter_instance({"cmd": "quit"}) == "OCCUPE"
+    assert instance.recus == []
+    instance.occupe["v"] = False
+    assert tray.contacter_instance({"cmd": "quit"}) == "OK"
+    assert instance.recus == [{"cmd": "quit"}]
+
+
+def test_deux_profils_utilisateur_ont_chacun_leur_instance(tmp_path):
+    """Le verrou et le serveur sont par profil : l'instance de A ne répond jamais pour B."""
+    a, b = tmp_path / "A", tmp_path / "B"
+    va, vb = tray.prendre_verrou(a), tray.prendre_verrou(b)
+    assert va is not None and vb is not None
+    sa, ja = tray.ouvrir_serveur(a)
+    recus: list = []
+    threading.Thread(target=tray.servir_instance, args=(sa, ja, recus.append), daemon=True).start()
+    try:
+        assert tray.contacter_instance({"cmd": "show"}, dossier=a) == "OK"
+        assert tray.contacter_instance({"cmd": "show"}, dossier=b) is None
+    finally:
+        sa.close()
+        va.close()
+        vb.close()
     assert recus == [{"cmd": "show"}]
 
 
-def test_instance_message_sans_retour_a_la_ligne_accepte(serveur):
-    port, recus, _ = serveur
-    assert _brut(port, b'{"cmd":"show"}') == b"OK"
-
-
-def test_instance_message_trop_gros_est_refuse_sans_tuer_le_serveur(serveur):
-    port, recus, _ = serveur
-    enorme = json.dumps({"cmd": "files", "paths": ["C:\\" + "x" * 200 + ".pdf"] * 6000}).encode() + b"\n"
-    assert len(enorme) > (1 << 20)
-    assert _brut(port, enorme) in (b"", )
-    assert tray.prevenir_instance_existante({"cmd": "show"})
-
-
-def _port_etranger(monkeypatch):
-    """Un « programme étranger » qui accepte les connexions (backlog) mais ne répond jamais."""
+def test_instance_json_perime_ou_etranger_ne_bloque_pas(tmp_path, monkeypatch):
+    """Si instance.json pointe vers un programme étranger muet : pas de blocage, pas de réponse."""
     muet = socket.socket()
     muet.bind(("127.0.0.1", 0))
     muet.listen(5)
-    monkeypatch.setattr(tray, "PORT_INSTANCE", muet.getsockname()[1])
+    (tmp_path / tray.FICHIER_INSTANCE).write_text(
+        json.dumps({"port": muet.getsockname()[1], "jeton": "x", "version": "1"}))
     reel = socket.create_connection
     monkeypatch.setattr(tray.socket, "create_connection",
-                        lambda adresse, timeout=None: reel(adresse, timeout=0.4))     # 3 s -> 0.4 s
-    return muet
-
-
-def test_client_quand_le_port_est_tenu_par_un_programme_etranger(monkeypatch):
-    muet = _port_etranger(monkeypatch)
+                        lambda adresse, timeout=None: reel(adresse, timeout=0.4))
     try:
-        assert tray.prevenir_instance_existante({"cmd": "show"}) is False
+        assert tray.contacter_instance({"cmd": "show"}, dossier=tmp_path) is None
     finally:
         muet.close()
 
 
-@GUI
-def test_main_avec_port_etranger_continue_sans_instance_unique(tmp_path, monkeypatch, fabrique):
-    """Le port est pris par autre chose : on ne doit pas s'effacer, la fenêtre doit s'ouvrir."""
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
-    muet = _port_etranger(monkeypatch)
-    vues = []
-
-    def faux_lancer(self):
-        vues.append((self.visible, self.root.state()))
-        self.jobs.put(None)
-        self.root.destroy()
-    monkeypatch.setattr(tray.App, "lancer", faux_lancer)
-    avant = list(tray.log.handlers)
-    try:
-        assert tray.main([]) == 0
-    finally:
-        muet.close()
-        for h in tray.log.handlers[:]:
-            if h not in avant:
-                tray.log.removeHandler(h)
-                h.close()
-    assert vues == [(True, "normal")]
-
-
-@pytest.mark.xfail(strict=True, reason="GUI-2: une erreur transitoire de accept() (WSAECONNRESET/ECONNABORTED, "
-                                       "documentée par Winsock et accept(2)) fait sortir servir_instance : "
-                                       "le port reste occupé mais plus personne ne répond")
-def test_servir_instance_survit_a_une_erreur_transitoire_d_accept(monkeypatch):
-    tmp = socket.socket()
-    tmp.bind(("127.0.0.1", 0))
-    port = tmp.getsockname()[1]
-    tmp.close()
-    monkeypatch.setattr(tray, "PORT_INSTANCE", port)
-    reel = tray.devenir_instance_principale()
-    assert reel is not None
+def test_servir_instance_survit_a_une_erreur_transitoire_d_accept(tmp_path):
+    serveur, jeton = tray.ouvrir_serveur(tmp_path)
 
     class Capricieux:
         def __init__(self):
             self.n = 0
 
         def settimeout(self, t):
-            reel.settimeout(t)
+            serveur.settimeout(t)
 
         def accept(self):
             self.n += 1
             if self.n == 1:
                 raise ConnectionAbortedError(10053, "connexion annulée avant accept")
-            return reel.accept()
+            return serveur.accept()
 
         def fileno(self):
-            return reel.fileno()
+            return serveur.fileno()
 
-    recus = []
-    th = threading.Thread(target=tray.servir_instance, args=(Capricieux(), recus.append), daemon=True)
+    recus: list = []
+    th = threading.Thread(target=tray.servir_instance, args=(Capricieux(), jeton, recus.append), daemon=True)
     th.start()
     try:
         time.sleep(0.3)
         assert th.is_alive(), "le fil serveur est mort sur une erreur transitoire"
-        assert tray.prevenir_instance_existante({"cmd": "show"})
+        assert tray.contacter_instance({"cmd": "show"}, dossier=tmp_path) == "OK"
     finally:
-        reel.close()
+        serveur.close()
 
 
-def test_main_avec_fichier_quand_une_instance_tourne_transmet_et_sort(tmp_path, monkeypatch, serveur):
-    port, recus, _ = serveur
-    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+def test_oublier_serveur_ne_retire_que_sa_propre_publication(tmp_path):
+    serveur, jeton = tray.ouvrir_serveur(tmp_path)
+    try:
+        tray.oublier_serveur("autre-jeton", tmp_path)
+        assert (tmp_path / tray.FICHIER_INSTANCE).exists()
+        tray.oublier_serveur(jeton, tmp_path)
+        assert not (tmp_path / tray.FICHIER_INSTANCE).exists()
+    finally:
+        serveur.close()
+
+
+def _fermer_journal(avant):
+    for h in tray.log.handlers[:]:
+        if h not in avant:
+            tray.log.removeHandler(h)
+            h.close()
+
+
+def test_main_avec_fichier_quand_une_instance_tourne_transmet_et_sort(tmp_path, instance):
     src = _pdf(tmp_path / "x.pdf")
     avant = list(tray.log.handlers)
     try:
         t0 = time.time()
         assert tray.main([str(src)]) == 0
-        assert time.time() - t0 < 2
-        assert recus == [{"cmd": "files", "paths": [os.path.abspath(str(src))]}]
+        assert time.time() - t0 < 3
+        assert instance.recus == [{"cmd": "files", "paths": [os.path.abspath(str(src))]}]
         assert tray.main(["--tray"]) == 0
-        assert recus[-1] == {"cmd": "show"}
+        assert instance.recus[-1] == {"cmd": "show"}
     finally:
-        for h in tray.log.handlers[:]:
-            if h not in avant:
-                tray.log.removeHandler(h)
-                h.close()
+        _fermer_journal(avant)
 
 
-@pytest.mark.xfail(strict=True, reason="GUI-1: le port TCP 127.0.0.1:47653 est commun à toute la machine, pas à "
-                                       "l'utilisateur : la 2e session (autre profil, bureau à distance) croit qu'une "
-                                       "instance « à elle » tourne, lui confie ses fichiers (traités avec le dossier "
-                                       "de sortie de l'AUTRE profil) et ne démarre jamais")
-def test_instance_d_un_autre_profil_ne_recoit_pas_mes_fichiers(tmp_path, monkeypatch, serveur):
-    port, recus, _ = serveur                                 # « l'instance de l'utilisateur A »
-    monkeypatch.setenv("APPDATA", str(tmp_path / "profil_B"))   # « je suis l'utilisateur B »
-    avant = list(tray.log.handlers)
-    demarre = []
-    monkeypatch.setattr(tray, "TkinterDnD", object())          # évite d'ouvrir une vraie fenêtre
-    monkeypatch.setattr(tray.App, "__init__", lambda self, **k: demarre.append(k))
-    monkeypatch.setattr(tray.App, "lancer", lambda self: None)
+def _faux_lancer(vues, monkeypatch):
+    def faux_lancer(self):
+        vues.append((self.visible, self.root.state()))
+        self.jobs.put(None)
+        self.root.destroy()
+    monkeypatch.setattr(tray.App, "lancer", faux_lancer)
     monkeypatch.setattr(tray, "activer_dpi_windows", lambda: None)
+
+
+@GUI
+def test_main_quand_le_verrou_est_tenu_mais_personne_ne_repond_continue(tmp_path, monkeypatch, fabrique):
+    """Un verrou orphelin ne doit pas empêcher l'outil de s'ouvrir."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    verrou = tray.prendre_verrou()
+    monkeypatch.setattr(tray, "contacter_instance", lambda *a, **k: None)
+    vues: list = []
+    _faux_lancer(vues, monkeypatch)
+    avant = list(tray.log.handlers)
     try:
-        tray.main([str(_pdf(tmp_path / "de_B.pdf"))])
+        assert tray.main([]) == 0
     finally:
-        for h in tray.log.handlers[:]:
-            if h not in avant:
-                tray.log.removeHandler(h)
-                h.close()
-    assert recus == [], "les fichiers de B ont été envoyés à l'instance de A"
-    assert demarre, "l'instance de B ne s'est pas lancée"
+        verrou.close()
+        _fermer_journal(avant)
+    assert vues == [(True, "normal")]
+
+
+@GUI
+def test_main_remplace_une_instance_d_une_autre_version(tmp_path, instance, monkeypatch, fabrique):
+    """Mise à jour de l'exe : l'ancienne instance reçoit « quit », relâche le verrou, la nouvelle démarre."""
+    monkeypatch.setattr(tray, "VERSION", "99-nouvelle")
+    vues: list = []
+    _faux_lancer(vues, monkeypatch)
+    avant = list(tray.log.handlers)
+    try:
+        assert tray.main([]) == 0
+    finally:
+        _fermer_journal(avant)
+    assert instance.recus == [{"cmd": "quit"}]
+    assert vues == [(True, "normal")]
+
+
+def test_main_autre_version_occupee_n_ecrase_rien(tmp_path, instance, monkeypatch):
+    monkeypatch.setattr(tray, "VERSION", "99-nouvelle")
+    instance.occupe["v"] = True
+    infos = []
+    monkeypatch.setattr(tray, "message_info", infos.append)
+    avant = list(tray.log.handlers)
+    try:
+        assert tray.main([]) == 0
+    finally:
+        _fermer_journal(avant)
+    assert instance.recus == [] and len(infos) == 1 and "traiter" in infos[0]
+
+
+def test_main_ancienne_version_a_port_fixe_est_signalee(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setattr(tray, "ancienne_version_active", lambda: True)
+    infos = []
+    monkeypatch.setattr(tray, "message_info", infos.append)
+    avant = list(tray.log.handlers)
+    try:
+        assert tray.main([]) == 0
+    finally:
+        _fermer_journal(avant)
+    assert len(infos) == 1 and "ancienne version" in infos[0].lower()

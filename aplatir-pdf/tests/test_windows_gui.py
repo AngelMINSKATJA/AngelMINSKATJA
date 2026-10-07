@@ -76,10 +76,6 @@ def faire_app(tmp_path, monkeypatch):
 # WIN-2 : hauteur des lignes du tableau de résultats avec une mise à l'échelle Windows élevée
 # --------------------------------------------------------------------------- #
 @GUI
-@pytest.mark.xfail(strict=True, reason="WIN-2: ttk.Treeview (Tk 8.6) garde des lignes de 20 px quelle que soit la "
-                                       "mise à l'échelle (ttkTreeview.c : DEFAULT_ROWHEIGHT 20, aucun réglage "
-                                       "-rowheight dans le thème vista ni dans l'application) alors que la police "
-                                       "grandit avec le DPI : à 175-200 % (portables/écrans 4K) le texte est coupé")
 @pytest.mark.parametrize("echelle", [1.5, 2.0], ids=["150%", "200%"])
 def test_lignes_du_tableau_assez_hautes_pour_la_police(faire_app, monkeypatch, echelle):
     import tkinter.font as tkfont
@@ -108,10 +104,6 @@ def test_lignes_du_tableau_assez_hautes_pour_la_police(faire_app, monkeypatch, e
 # WIN-6 : le travail se fait DANS le rappel de dépôt OLE (l'Explorateur attend la fin de Drop)
 # --------------------------------------------------------------------------- #
 @GUI
-@pytest.mark.xfail(strict=True, reason="WIN-6: tkdnd renvoie à OLE la valeur de retour du script <<Drop>> : le glisser-"
-                                       "déposer reste SYNCHRONE et l'Explorateur (source) est bloqué tant que _on_drop "
-                                       "n'a pas rendu la main. Or ajouter() fait le parcours des dossiers et, au "
-                                       "premier usage, ouvre le sélecteur de dossier MODAL à l'intérieur de Drop")
 def test_le_depot_est_traite_apres_le_retour_du_rappel_drop(faire_app, tmp_path):
     app = faire_app()
     pdf = _pdf(tmp_path / "in" / "a b.pdf")
@@ -130,8 +122,6 @@ def test_le_depot_est_traite_apres_le_retour_du_rappel_drop(faire_app, tmp_path)
 
 
 @GUI
-@pytest.mark.xfail(strict=True, reason="WIN-6: sans dossier de sortie, le sélecteur de dossier modal s'ouvre dans le "
-                                       "rappel <<Drop>> (Explorateur figé jusqu'à ce que l'utilisateur réponde)")
 def test_selecteur_de_dossier_jamais_ouvert_dans_le_rappel_drop(faire_app, tmp_path, monkeypatch):
     app = faire_app(sortie=False)
     pdf = _pdf(tmp_path / "in" / "a.pdf")
@@ -181,10 +171,6 @@ exec(compile(source, chemin, "exec"), {"__name__": "__main__", "__file__": chemi
 
 
 @GUI
-@pytest.mark.xfail(strict=True, raises=pytest.fail.Exception,
-                   reason="WIN-5: os._exit() n'est atteint que si main() RETOURNE ; si une exception s'en échappe, "
-                          "l'interpréteur attend le fil NON démon de pystray (_win32.Icon._run_detached) : processus "
-                          "et icône morts qui restent jusqu'à ce qu'on les tue dans le Gestionnaire des tâches")
 def test_le_processus_s_arrete_meme_si_main_leve(tmp_path):
     racine = str(pathlib.Path(tray.__file__).resolve().parent)
     appdata = tmp_path / "appdata"
@@ -195,7 +181,7 @@ def test_le_processus_s_arrete_meme_si_main_leve(tmp_path):
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
     s.close()
-    env = dict(os.environ, APPDATA=str(appdata))
+    env = dict(os.environ, APPDATA=str(appdata), APLATIR_SANS_DIALOGUE="1")
     try:
         subprocess.run([sys.executable, "-c", _HARNAIS, racine, str(port)], capture_output=True, text=True,
                        timeout=6, env=env)

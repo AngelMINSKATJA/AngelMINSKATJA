@@ -132,8 +132,6 @@ def _pdf_ressources_heritees(chemin, nb_pages=3):
     chemin.write_bytes(bytes(out))
 
 
-@pytest.mark.xfail(strict=True, reason="ANN-1: bake + save(garbage>=2) avec /Resources hérité direct "
-                                       "-> références nulles, tampons perdus, statut 'ok'")
 def test_ressources_heritees_tampons_conserves(tmp_path):
     src = tmp_path / "heritees.pdf"
     _pdf_ressources_heritees(src)
@@ -157,7 +155,6 @@ def _pdf_tampon(tmp_path, nom, flags=4, extra="", prepare=None):
 
 
 @pytest.mark.parametrize("flags", [32, 36], ids=["NoView", "NoView+Print"])
-@pytest.mark.xfail(strict=True, reason="ANN-2: annotation NoView cuite dans la page -> devient visible")
 def test_annotation_noview_reste_invisible(tmp_path, flags):
     src = _pdf_tampon(tmp_path, "noview.pdf", flags)
     assert not _rouge_au_centre(_rendu(src))      # MuPDF (et la norme) : invisible à l'écran
@@ -173,7 +170,6 @@ def _ocg_desactive(d):
     return ocg
 
 
-@pytest.mark.xfail(strict=True, reason="ANN-2: annotation dont /OC est désactivé -> devient visible")
 def test_annotation_calque_masque_reste_invisible(tmp_path):
     d = _doc_base()
     ocg = _ocg_desactive(d)
@@ -184,7 +180,6 @@ def test_annotation_calque_masque_reste_invisible(tmp_path):
     assert not _rouge_au_centre(_rendu(res.dst, annots=False)), res.message
 
 
-@pytest.mark.xfail(strict=True, reason="ANN-2: champ « masqué mais imprimable » (F=36) -> devient visible")
 def test_champ_noview_reste_invisible(tmp_path):
     d = _doc_base()
     w = pymupdf.Widget()
@@ -387,8 +382,6 @@ def test_piece_jointe_d_annotation_conservee_ou_signalee(tmp_path):
 # --------------------------------------------------------------------------- #
 # ANN-4 : liens internes après repli image
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="ANN-4: repli image -> liens internes vers la page remplacée "
-                                       "supprimés, liens de cette page retargetés sur elle-même")
 def test_liens_internes_apres_repli_image(tmp_path, monkeypatch):
     d = pymupdf.open()
     for i in range(3):

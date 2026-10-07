@@ -120,18 +120,12 @@ def test_acces_registre_refuse_rend_false(reg, monkeypatch):
 # --------------------------------------------------------------------------- #
 # WIN-1 : « désactivé » par Windows (StartupApproved) n'est ni vu ni levé
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="WIN-1: l'utilisateur (ou Windows) désactive l'entrée dans Paramètres > "
-                                       "Applications > Démarrage / Gestionnaire des tâches : Windows écrit un "
-                                       "veto dans ...\\Explorer\\StartupApproved\\Run et laisse la valeur Run. "
-                                       "demarrage_actif() répond True et regler_demarrage(True) ne lève pas le veto")
 def test_demarrage_actif_tient_compte_du_veto_de_windows(reg):
     assert tray.regler_demarrage(True)
     reg.poser(APPROUVE, tray.ID_APP, DESACTIVE, reg.REG_BINARY)
     assert tray.demarrage_actif() is False, "l'outil affiche « lancé au démarrage » alors que Windows ne le lance plus"
 
 
-@pytest.mark.xfail(strict=True, reason="WIN-1: recocher « Lancer au démarrage de Windows » ne réactive pas une "
-                                       "entrée désactivée par Windows (seule la valeur Run est réécrite)")
 def test_reactiver_leve_le_veto_de_windows(reg):
     assert tray.regler_demarrage(True)
     reg.poser(APPROUVE, tray.ID_APP, DESACTIVE, reg.REG_BINARY)

@@ -121,9 +121,6 @@ def _pixels_pdfium(chemin, num_page: int, point):
 RESSOURCES_DIRECTES = "<</Font<</F1 26 0 R>>>>"
 
 
-@pytest.mark.xfail(strict=True, reason="MERGE-1 (prolonge ANN-1) : /Resources direct herite du noeud /Pages : apres bake + "
-                   "save(garbage=3) les polices de TOUTES les pages (meme sans annotation) pointent vers de "
-                   "mauvais objets (/F1 -> XObject de la signature) ; poppler perd tout le texte")
 def test_ressources_directes_heritees_polices_intactes(tmp_path):
     res = _aplatir(tmp_path, _pdf_signe(RESSOURCES_DIRECTES))
     d = pymupdf.open(str(res.dst))

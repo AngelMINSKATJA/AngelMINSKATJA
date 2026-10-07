@@ -201,7 +201,6 @@ def _doc_xfa_dynamique():
     return d
 
 
-@pytest.mark.xfail(strict=True, reason="FORM-1: formulaire XFA dynamique copie tel quel, statut vert « Copie »")
 def test_xfa_dynamique_est_signale(tmp_path):
     src = _ecrire(_doc_xfa_dynamique(), tmp_path / "xfa.pdf")
     res = _aplatir(tmp_path, src)
@@ -243,7 +242,6 @@ def test_combo_export_avec_apparence_stockee_ok(tmp_path):
     assert res.statut == "ok" and "Beta" in _textes(res.dst)[0]
 
 
-@pytest.mark.xfail(strict=True, reason="FORM-2: combo [export, libelle] sans /AP : l'export « 2 » est grave au lieu de « Beta »")
 def test_combo_export_sans_apparence_affiche_le_libelle(tmp_path):
     src = _ecrire(_doc_combo_export(False, False), tmp_path / "combo_noap.pdf")
     res = _aplatir(tmp_path, src)
@@ -300,7 +298,6 @@ def test_need_appearances_n_oblige_pas_a_rasteriser(tmp_path):
 # --------------------------------------------------------------------------- #
 # FORM-4 : champ avec /RV (texte riche) et sans /AP : MuPDF ne dessine rien -> valeur perdue, statut « ok »
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="FORM-4: champ /RV sans /AP rendu VIDE par MuPDF : la valeur disparait, statut « ok »")
 def test_champ_texte_riche_sans_apparence_garde_sa_valeur(tmp_path):
     d = _doc()
     p = d[0]
@@ -317,7 +314,6 @@ def test_champ_texte_riche_sans_apparence_garde_sa_valeur(tmp_path):
 # --------------------------------------------------------------------------- #
 # FORM-6 : widget /F NoView (jamais affiche a l'ecran) rendu visible par l'aplatissement
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="FORM-6: un champ NoView (invisible a l'ecran) devient visible apres aplatissement")
 def test_champ_noview_reste_invisible(tmp_path):
     d = _doc()
     p = d[0]
@@ -379,7 +375,6 @@ def _doc_formulaire_lourd(pages, champs_par_page):
     return d
 
 
-@pytest.mark.xfail(strict=True, reason="FORM-7: save(garbage=3) quadratique : 49 s (GIL tenu, interface gelee) pour 900 pages de champs")
 def test_enregistrement_garbage3_pas_quadratique(tmp_path):
     src = _ecrire(_doc_formulaire_lourd(200, 24), tmp_path / "lourd.pdf")
     # reference : meme document, aplati puis enregistre avec garbage=2

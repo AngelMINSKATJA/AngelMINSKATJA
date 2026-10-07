@@ -20,7 +20,7 @@ def _pdf_avec_elements(chemin):
     d.close()
 
 
-def _pdf_signature_image(chemin):
+def _pdf_signature_image(chemin, signe=True):
     """Champ signature dont l'apparence est un rectangle rouge (comme un outil de e-signature)."""
     d = pymupdf.open()
     p = d.new_page()
@@ -34,6 +34,10 @@ def _pdf_signature_image(chemin):
     d.update_object(ap, "<</Type/XObject/Subtype/Form/BBox[0 0 200 50]/Resources<<>>>>")
     d.update_stream(ap, b"q 1 0 0 rg 0 0 200 50 re f Q")
     d.xref_set_key(xref_w, "AP", f"<</N {ap} 0 R>>")
+    if signe:       # comme un outil de e-signature : /V pointe vers un dictionnaire de signature
+        sig = d.get_new_xref()
+        d.update_object(sig, "<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached/Contents<00>>>")
+        d.xref_set_key(xref_w, "V", f"{sig} 0 R")
     d.save(str(chemin))
     d.close()
 
@@ -113,15 +117,19 @@ def test_collecter_pdf(tmp_path):
     pdfs, ignores = core.collecter_pdf([tmp_path / "d", tmp_path / "d" / "Rapport 2.pdf",
                                         tmp_path / "d" / "note.txt", tmp_path / "absent.pdf"])
     assert [p.name for p in pdfs] == ["Rapport 2.pdf", "Rapport 10.pdf", "z.PDF"]   # ordre naturel, sans doublon
-    assert {p.name for p, _ in ignores} == {"note.txt", "absent.pdf"}
+    assert {p.name for p, _ in ignores} == {"note.txt", "absent.pdf", "d"}   # « d » : 1 fichier [a]- ignoré
+    assert any("déjà aplati" in raison for _, raison in ignores)
 
 
-def test_dossier_de_sortie_exclu(tmp_path):
+def test_sorties_prefixees_ignorees_meme_dans_le_dossier_de_sortie(tmp_path):
+    """Seul le préfixe « [a]- » distingue les sorties : un PDF non préfixé est traité même s'il
+    se trouve dans le dossier de sortie (dossier de travail = dossier de sortie)."""
     (tmp_path / "out").mkdir()
     (tmp_path / "out" / "a.pdf").write_bytes(b"x")
+    (tmp_path / "out" / "[a]- a.pdf").write_bytes(b"x")
     (tmp_path / "b.pdf").write_bytes(b"x")
-    pdfs, _ = core.collecter_pdf([tmp_path], exclure=tmp_path / "out")
-    assert [p.name for p in pdfs] == ["b.pdf"]
+    pdfs, _ = core.collecter_pdf([tmp_path])
+    assert sorted(p.name for p in pdfs) == ["a.pdf", "b.pdf"]
 
 
 def test_ecrasement_et_pas_de_fichier_temporaire_restant(tmp_path):

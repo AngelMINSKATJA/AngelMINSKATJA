@@ -28,21 +28,30 @@ def _reparer_flux_standard() -> None:
 _reparer_flux_standard()
 
 import argparse
+import hmac
 import json
 import logging
 import logging.handlers
 import queue
+import secrets
 import socket
 import subprocess
 import threading
+import time
 import traceback
 from pathlib import Path
 
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
 import aplatir_core as core
 from aplatir_icon import dessiner_icone, icone_png_base64
+
+try:
+    from _version import VERSION      # écrit par build.py (numéro de fabrication)
+except Exception:
+    VERSION = "dev"
 
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -56,9 +65,13 @@ except Exception:     # pas d'affichage / pas de backend : on fonctionne sans ic
 
 NOM_APP = "Aplatir PDF"
 ID_APP = "AplatirPDF"
-PORT_INSTANCE = 47653
+PORT_ANCIEN = 47653      # port fixe réservé par les toutes premières versions
+FICHIER_VERROU = "instance.lock"
+FICHIER_INSTANCE = "instance.json"
 CLE_RUN = r"Software\Microsoft\Windows\CurrentVersion\Run"
-DEFAUTS = {"sortie": "", "demarrage_auto": True, "premier_plan": True, "securite": True}
+CLE_APPROUVE = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+DEFAUTS = {"sortie": "", "demarrage_auto": True, "premier_plan": True, "securite": True,
+           "astuce_vue": False}
 
 log = logging.getLogger(ID_APP)
 
@@ -134,20 +147,41 @@ def commande_demarrage() -> str:
     return f'"{interpreteur}" "{Path(__file__).resolve()}" --tray'
 
 
+def _veto_windows(nom: str = ID_APP) -> bool:
+    """Windows (Gestionnaire des tâches > Démarrage, Paramètres > Applications > Démarrage)
+    désactive une entrée SANS toucher à la clé « Run » : il l'écrit dans StartupApproved
+    (premier octet impair = désactivée)."""
+    if sys.platform != "win32":
+        return False
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, CLE_APPROUVE) as cle:
+            valeur, _ = winreg.QueryValueEx(cle, nom)
+    except OSError:
+        return False
+    return isinstance(valeur, (bytes, bytearray)) and len(valeur) > 0 and (valeur[0] & 1) == 1
+
+
 def demarrage_actif(nom: str = ID_APP) -> bool:
+    """Vrai si l'outil démarrera réellement avec Windows (entrée présente ET non désactivée)."""
     if sys.platform != "win32":
         return False
     import winreg
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, CLE_RUN) as cle:
             winreg.QueryValueEx(cle, nom)
-            return True
     except OSError:
         return False
+    return not _veto_windows(nom)
 
 
-def regler_demarrage(actif: bool, nom: str = ID_APP) -> bool:
-    """Ajoute/retire l'entrée de démarrage. Retourne True si l'opération a réussi."""
+def regler_demarrage(actif: bool, nom: str = ID_APP, lever_veto: bool = True) -> bool:
+    """Ajoute/retire l'entrée de démarrage. Retourne True si l'opération a réussi.
+
+    ``lever_veto`` : en activant, supprime aussi la désactivation faite côté Windows (sinon
+    recocher la case ne ferait rien). Le rafraîchissement automatique du chemin de l'exe, au
+    lancement, passe ``lever_veto=False`` pour respecter un choix délibéré de l'utilisateur.
+    """
     if sys.platform != "win32":
         return False
     import winreg
@@ -160,37 +194,101 @@ def regler_demarrage(actif: bool, nom: str = ID_APP) -> bool:
                     winreg.DeleteValue(cle, nom)
                 except FileNotFoundError:
                     pass
-        return True
     except OSError:
         log.warning("démarrage automatique : accès au registre refusé", exc_info=True)
         return False
+    if actif and lever_veto:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, CLE_APPROUVE, 0, winreg.KEY_SET_VALUE) as cle:
+                winreg.DeleteValue(cle, nom)
+        except OSError:
+            pass            # pas de veto : rien à lever
+    return True
 
 
 # --------------------------------------------------------------------------- #
-# Instance unique (petit serveur local : une 2e instance prévient la 1re puis s'arrête)
+# Instance unique, PAR PROFIL Windows : verrou de fichier (exclusif, relâché automatiquement
+# à la mort du processus) + petit serveur local authentifié par un jeton, pour réveiller
+# l'instance déjà lancée, lui passer des fichiers, ou lui demander de se fermer quand on
+# lance une autre version de l'exe (mise à jour).
 # --------------------------------------------------------------------------- #
-def devenir_instance_principale():
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def prendre_verrou(dossier: Path | None = None):
+    """Retourne le fichier verrouillé (à garder ouvert), ou None si une autre instance du même
+    profil le détient. Lève OSError si le verrou ne peut pas être créé (dossier inaccessible)."""
+    d = Path(dossier) if dossier else dossier_config()
+    d.mkdir(parents=True, exist_ok=True)
+    f = open(d / FICHIER_VERROU, "a+b")
     try:
-        s.bind(("127.0.0.1", PORT_INSTANCE))
-        s.listen(5)
-        return s
+        if sys.platform == "win32":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
+def ouvrir_serveur(dossier: Path | None = None):
+    """Ouvre le serveur local (port choisi par le système, 127.0.0.1 seulement) et publie
+    ``instance.json`` (port + jeton) dans le dossier du profil. Retourne ``(socket, jeton)``."""
+    d = Path(dossier) if dossier else dossier_config()
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    s.listen(5)
+    jeton = secrets.token_hex(16)
+    info = {"port": s.getsockname()[1], "jeton": jeton, "version": VERSION, "pid": os.getpid()}
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        tmp = d / (FICHIER_INSTANCE + ".tmp")
+        tmp.write_text(json.dumps(info), encoding="utf-8")
+        os.replace(tmp, d / FICHIER_INSTANCE)
     except OSError:
         s.close()
-        return None
+        raise
+    return s, jeton
 
 
-def prevenir_instance_existante(message: dict) -> bool:
+def oublier_serveur(jeton: str | None, dossier: Path | None = None) -> None:
+    """Retire ``instance.json`` s'il décrit CETTE instance."""
+    d = Path(dossier) if dossier else dossier_config()
     try:
-        with socket.create_connection(("127.0.0.1", PORT_INSTANCE), timeout=3) as c:
-            c.sendall((json.dumps(message) + "\n").encode("utf-8"))
-            c.shutdown(socket.SHUT_WR)
-            return c.recv(16).startswith(b"OK")
-    except OSError:
-        return False
+        info = json.loads((d / FICHIER_INSTANCE).read_text(encoding="utf-8"))
+        if jeton and info.get("jeton") == jeton:
+            (d / FICHIER_INSTANCE).unlink()
+    except (OSError, ValueError):
+        pass
 
 
-def servir_instance(serveur: socket.socket, poster) -> None:
+def contacter_instance(message: dict, dossier: Path | None = None, attente: float = 0.0):
+    """Envoie ``message`` à l'instance du profil. Retourne sa réponse (« OK » traité, « AUTRE »
+    autre version, « OCCUPE » traitement en cours, « NON » jeton refusé) ou None si personne
+    n'a répondu dans le délai ``attente`` (secondes)."""
+    d = Path(dossier) if dossier else dossier_config()
+    fin = time.monotonic() + attente
+    while True:
+        try:
+            info = json.loads((d / FICHIER_INSTANCE).read_text(encoding="utf-8"))
+            msg = dict(message, jeton=info["jeton"], version=VERSION)
+            with socket.create_connection(("127.0.0.1", int(info["port"])), timeout=3) as c:
+                c.sendall((json.dumps(msg) + "\n").encode("utf-8"))
+                c.shutdown(socket.SHUT_WR)
+                rep = c.recv(16).decode("ascii", "replace").strip()
+            if rep in ("OK", "AUTRE", "OCCUPE", "NON"):
+                return rep
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        if time.monotonic() >= fin:
+            return None
+        time.sleep(0.2)
+
+
+def servir_instance(serveur: socket.socket, jeton: str, poster, occupe=lambda: False,
+                    version: str | None = None) -> None:
+    ma_version = VERSION if version is None else version
     serveur.settimeout(1.0)
     while True:
         try:
@@ -198,7 +296,10 @@ def servir_instance(serveur: socket.socket, poster) -> None:
         except socket.timeout:
             continue
         except OSError:
-            return
+            if serveur.fileno() == -1:      # fermé volontairement
+                return
+            time.sleep(0.1)                 # erreur passagère (ex. connexion annulée) : on continue
+            continue
         with c:
             try:
                 c.settimeout(3)
@@ -211,11 +312,35 @@ def servir_instance(serveur: socket.socket, poster) -> None:
                     if data.endswith(b"\n"):
                         break
                 msg = json.loads(data.decode("utf-8"))
-                if isinstance(msg, dict):
-                    poster(msg)
+                if not isinstance(msg, dict):
+                    continue
+                if not hmac.compare_digest(str(msg.get("jeton", "")), jeton):
+                    c.sendall(b"NON")
+                elif msg.get("cmd") == "quit":
+                    if occupe():
+                        c.sendall(b"OCCUPE")
+                    else:
+                        poster({"cmd": "quit"})
+                        c.sendall(b"OK")
+                elif msg.get("version") != ma_version:
+                    c.sendall(b"AUTRE")
+                else:
+                    poster({k: v for k, v in msg.items() if k not in ("jeton", "version")})
                     c.sendall(b"OK")
             except Exception:
                 log.warning("message d'instance invalide", exc_info=True)
+
+
+def ancienne_version_active() -> bool:
+    """Les toutes premières versions réservaient le port fixe 47653 et répondaient OK à tout :
+    on le détecte pour demander de les fermer plutôt que d'ouvrir une 2e icône."""
+    try:
+        with socket.create_connection(("127.0.0.1", PORT_ANCIEN), timeout=1) as c:
+            c.sendall(b'{"cmd": "show"}\n')
+            c.shutdown(socket.SHUT_WR)
+            return c.recv(16).startswith(b"OK")
+    except OSError:
+        return False
 
 
 # --------------------------------------------------------------------------- #
@@ -256,18 +381,22 @@ LIBELLES = {   # statut -> (texte, étiquette de couleur)
 # Application
 # --------------------------------------------------------------------------- #
 class App:
-    def __init__(self, cache: bool, fichiers: list, serveur: socket.socket | None):
+    def __init__(self, cache: bool, fichiers: list, serveur: socket.socket | None, jeton: str | None = None):
         self.cfg = Config()
         premiere_fois = not self.cfg.charger()
         if getattr(sys, "frozen", False):          # garde le chemin de l'exe à jour
-            regler_demarrage(self.cfg["demarrage_auto"])
+            regler_demarrage(self.cfg["demarrage_auto"], lever_veto=False)
+            if sys.platform == "win32":            # reflète un éventuel choix fait côté Windows
+                self.cfg["demarrage_auto"] = demarrage_actif()
         if premiere_fois:
             self.cfg.sauver()
+        self.jeton = jeton
+        self.reserves: dict = {}                    # noms de sortie déjà attribués dans cette session
 
         self.evenements: queue.Queue = queue.Queue()   # tout ce qui doit toucher à l'interface
         self.jobs: queue.Queue = queue.Queue()
         self.en_cours = 0
-        self.stats = {"ok": 0, "alerte": 0, "erreur": 0, "ignore": 0}
+        self.stats = self._stats_vides()
         self.visible = False
         self.icone = None
 
@@ -279,7 +408,8 @@ class App:
 
         threading.Thread(target=self._boucle_travail, daemon=True).start()
         if serveur is not None:
-            threading.Thread(target=servir_instance, args=(serveur, self._message_instance),
+            threading.Thread(target=servir_instance,
+                             args=(serveur, jeton or "", self._message_instance, lambda: self.en_cours > 0),
                              daemon=True).start()
         self._demarrer_icone()
         self.root.after(100, self._pomper)
@@ -291,15 +421,19 @@ class App:
         if fichiers:
             self.root.after(400, lambda: self.ajouter(fichiers))
 
+    @staticmethod
+    def _stats_vides() -> dict:
+        return {"ok": 0, "copie": 0, "alerte": 0, "erreur": 0, "ignore": 0}
+
     # ----- interface ------------------------------------------------------- #
     def _px(self, v: int) -> int:
         return int(v * self.k)
 
     def _construire(self) -> None:
         r = self.root
-        r.title(NOM_APP)
-        r.geometry(f"{self._px(640)}x{self._px(560)}")
-        r.minsize(self._px(520), self._px(440))
+        r.title(NOM_APP if VERSION == "dev" else f"{NOM_APP} — version {VERSION}")
+        r.geometry(f"{self._px(900)}x{self._px(580)}")
+        r.minsize(self._px(560), self._px(440))
         try:
             self._img_icone = tk.PhotoImage(data=icone_png_base64(64))
             r.iconphoto(True, self._img_icone)
@@ -332,11 +466,14 @@ class App:
         cadre.grid(row=2, column=0, sticky="nsew")
         cadre.columnconfigure(0, weight=1)
         cadre.rowconfigure(0, weight=1)
+        # lignes assez hautes pour la police à l'échelle d'affichage choisie (Tk fixe 20 px sinon)
+        hauteur = tkfont.nametofont("TkDefaultFont", r).metrics("linespace") + self._px(6)
+        ttk.Style(r).configure("Treeview", rowheight=max(self._px(20), hauteur))
         self.arbre = ttk.Treeview(cadre, columns=("fichier", "statut", "detail"),
                                   show="headings", selectmode="extended")
-        for col, texte, largeur, etire in (("fichier", "Fichier", 200, False),
-                                           ("statut", "Résultat", 120, False),
-                                           ("detail", "Détail", 280, True)):
+        for col, texte, largeur, etire in (("fichier", "Fichier", 420, True),
+                                           ("statut", "Résultat", 130, False),
+                                           ("detail", "Détail", 300, True)):
             self.arbre.heading(col, text=texte)
             self.arbre.column(col, width=self._px(largeur), stretch=etire)
         self.arbre.tag_configure("ok", foreground="#1a7f37")
@@ -402,12 +539,27 @@ class App:
         return event.action
 
     def _on_drop(self, event):
+        """Ne fait que relever les chemins : le traitement est différé (``after``) car l'appel
+        OLE de dépôt est synchrone et bloquerait l'Explorateur pendant l'analyse d'un dossier
+        ou l'affichage d'une boîte de dialogue."""
         self.zone.configure(bg="#eef3fb")
         try:
-            self.ajouter(list(self.root.tk.splitlist(event.data)))
+            chemins = list(self.root.tk.splitlist(event.data))
         except Exception:
             self._erreur_tk(*sys.exc_info())
+            return event.action
+        if not chemins:
+            self.var_statut.set("Ce glisser-déposer n'est pas pris en charge (pièce jointe d'e-mail ?) : "
+                                "enregistrez d'abord le fichier sur le Bureau, puis glissez-le.")
+        else:
+            self.root.after(20, lambda: self._ajouter_sans_risque(chemins))
         return event.action
+
+    def _ajouter_sans_risque(self, chemins: list) -> None:
+        try:
+            self.ajouter(chemins)
+        except Exception:
+            self._erreur_tk(*sys.exc_info())
 
     def _erreur_tk(self, exc, val, tb) -> None:
         log.error("erreur interface\n%s", "".join(traceback.format_exception(exc, val, tb)))
@@ -434,7 +586,11 @@ class App:
 
     def fermer_fenetre(self) -> None:
         if self.icone is not None:
-            self.masquer()          # le croix réduit dans la zone de notification
+            self.masquer()          # la croix réduit dans la zone de notification
+            if not self.cfg["astuce_vue"]:
+                self.cfg["astuce_vue"] = True
+                self.notifier("Aplatir PDF reste actif près de l'horloge (flèche ^ sous Windows 11). "
+                              "Cliquez sur son icône pour rouvrir la fenêtre.")
         else:
             self.quitter()
 
@@ -449,7 +605,8 @@ class App:
         ok = regler_demarrage(actif)
         if not ok and sys.platform == "win32":
             messagebox.showwarning(NOM_APP, "Impossible de modifier le démarrage automatique.")
-            actif = demarrage_actif()
+        if sys.platform == "win32":
+            actif = demarrage_actif()       # état réel (tient compte d'un blocage côté Windows)
         self.cfg["demarrage_auto"] = bool(actif)
         self.var_demarrage.set(bool(actif))
         if self.icone is not None:
@@ -469,6 +626,8 @@ class App:
     def _message_instance(self, msg: dict) -> None:
         if msg.get("cmd") == "files":
             self._poster("fichiers", [str(p) for p in msg.get("paths", [])])
+        elif msg.get("cmd") == "quit":      # une autre version de l'exe demande la place
+            self._poster("quitter_force")
         else:
             self._poster("afficher")
 
@@ -523,6 +682,8 @@ class App:
             self.definir_demarrage(not self.cfg["demarrage_auto"])
         elif nom == "quitter":
             self.quitter()
+        elif nom == "quitter_force":
+            self.quitter(confirmer=False)
         elif nom == "fichiers":
             self.ajouter(ev[1])
         elif nom == "debut":
@@ -583,21 +744,25 @@ class App:
                 self.var_statut.set("Aucun dossier de sortie choisi : rien n'a été traité.")
                 return
         sortie = Path(self.cfg["sortie"])
-        pdfs, ignores = core.collecter_pdf(chemins, exclure=sortie)
+        pdfs, ignores = core.collecter_pdf(chemins)
+        if self.en_cours == 0:
+            self.stats = self._stats_vides()
         for p, raison in ignores:
             iid = self.arbre.insert("", "end", values=(p.name, LIBELLES["ignore"][0], raison), tags=("ignore",))
             self.arbre.see(iid)
+            self.stats["ignore"] += 1
         if not pdfs:
-            if not ignores:
+            if ignores:
+                self.var_statut.set(f"Aucun PDF à traiter : {len(ignores)} élément(s) ignoré(s).")
+            else:
                 self.var_statut.set("Aucun PDF dans ce qui a été déposé.")
             return
-        if self.en_cours == 0:
-            self.stats = {"ok": 0, "alerte": 0, "erreur": 0, "ignore": 0}
         for p in pdfs:
+            dst = core.chemin_sortie_unique(p, sortie, self.reserves)   # 2 sources de même nom : « (2) »
             iid = self.arbre.insert("", "end", values=(p.name, "⏳ En attente", str(p.parent)), tags=("attente",))
             self.arbre.see(iid)
             self.en_cours += 1
-            self.jobs.put((iid, p, sortie, bool(self.cfg["securite"])))
+            self.jobs.put((iid, p, sortie, bool(self.cfg["securite"]), dst))
         self.var_statut.set(f"{self.en_cours} fichier(s) en cours de traitement…")
 
     def _boucle_travail(self) -> None:
@@ -605,10 +770,10 @@ class App:
             job = self.jobs.get()
             if job is None:
                 return
-            iid, src, sortie, securite = job
+            iid, src, sortie, securite, *reste = job
             self._poster("debut", iid)
             try:
-                res = core.aplatir_fichier(src, sortie, securite=securite)
+                res = core.aplatir_fichier(src, sortie, securite=securite, dst=reste[0] if reste else None)
             except Exception as e:      # ne devrait pas arriver : aplatir_fichier ne lève pas
                 res = core.Resultat(src=src, statut="erreur", message=f"{type(e).__name__} : {e}")
             self._poster("fin", iid, res)
@@ -621,7 +786,9 @@ class App:
             detail = f"{res.message}  →  {res.dst.name}"
         if self.arbre.exists(iid):
             self.arbre.item(iid, values=(res.src.name, texte, detail), tags=(tag,))
-        self.stats[tag if tag in self.stats else "ok"] += 1
+        cle = {"ok": "ok", "copie": "copie", "securite": "alerte", "alerte": "alerte",
+               "ignore": "ignore"}.get(res.statut, "erreur")
+        self.stats[cle] += 1
         log.info("%s | %s | %s | signatures=%s pages=%s image=%s", res.statut, res.src, detail,
                  res.signatures, res.pages_elements, res.pages_image)
         if self.en_cours:
@@ -632,6 +799,8 @@ class App:
     def _lot_termine(self) -> None:
         s = self.stats
         morceaux = [f"{s['ok']} aplati(s)"]
+        if s["copie"]:
+            morceaux.append(f"{s['copie']} copié(s) (rien à aplatir)")
         if s["alerte"]:
             morceaux.append(f"{s['alerte']} à vérifier")
         if s["erreur"]:
@@ -642,12 +811,14 @@ class App:
         self.var_statut.set(msg)
         self.notifier(msg)
 
-    def quitter(self) -> None:
-        if self.en_cours and not messagebox.askyesno(
+    def quitter(self, confirmer: bool = True) -> None:
+        if confirmer and self.en_cours and not messagebox.askyesno(
                 NOM_APP, "Un aplatissement est en cours.\nQuitter quand même ?", parent=self.root):
             return
+        oublier_serveur(self.jeton)
         try:
             if self.icone is not None:
+                self.icone.visible = False      # retire l'icône tout de suite (sinon fantôme jusqu'au survol)
                 self.icone.stop()
         except Exception:
             pass
@@ -728,17 +899,22 @@ def autotest(chemin_rapport: str) -> int:
         return "registre OK"
 
     def t_instance():
-        s = devenir_instance_principale()
-        if s is None:
-            return "port déjà pris (ignoré)"
-        recus = []
-        threading.Thread(target=servir_instance, args=(s, recus.append), daemon=True).start()
-        try:
-            assert prevenir_instance_existante({"cmd": "show"}), "pas de réponse"
-        finally:
-            s.close()
-        assert recus == [{"cmd": "show"}], recus
-        return "socket OK"
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            verrou = prendre_verrou(d)
+            assert verrou is not None, "verrou refusé"
+            assert prendre_verrou(d) is None, "2e verrou accepté"
+            serveur, jeton = ouvrir_serveur(d)
+            recus: list = []
+            threading.Thread(target=servir_instance, args=(serveur, jeton, recus.append),
+                             daemon=True).start()
+            try:
+                assert contacter_instance({"cmd": "show"}, d, attente=3) == "OK", "pas de réponse"
+            finally:
+                serveur.close()
+                verrou.close()
+            assert recus == [{"cmd": "show"}], recus
+        return "verrou + socket OK"
 
     for nom, f in (("infos", t_infos), ("aplatissement", t_aplatir), ("tkinterdnd2", t_tkdnd),
                    ("pystray", t_pystray), ("démarrage Windows", t_demarrage), ("instance unique", t_instance)):
@@ -752,6 +928,21 @@ def autotest(chemin_rapport: str) -> int:
 
 
 # --------------------------------------------------------------------------- #
+def message_info(texte: str) -> None:
+    """Petite boîte de dialogue sans fenêtre principale (l'application n'est pas démarrée).
+    ``APLATIR_SANS_DIALOGUE=1`` la remplace par une ligne de journal (tests, intégration continue)."""
+    if os.environ.get("APLATIR_SANS_DIALOGUE"):
+        log.info("message : %s", texte)
+        return
+    try:
+        racine = tk.Tk()
+        racine.withdraw()
+        messagebox.showinfo(NOM_APP, texte, parent=racine)
+        racine.destroy()
+    except Exception:
+        log.warning("boîte de dialogue impossible", exc_info=True)
+
+
 def main(argv: list | None = None) -> int:
     ap = argparse.ArgumentParser(description="Aplatir PDF - outil de barre des tâches", add_help=False)
     ap.add_argument("--tray", action="store_true")
@@ -768,25 +959,70 @@ def main(argv: list | None = None) -> int:
         return 1
     fichiers = [os.path.abspath(f) for f in args.fichiers]
 
-    serveur = devenir_instance_principale()
-    if serveur is None:        # une instance tourne déjà : on la réveille et on s'efface
+    if ancienne_version_active():       # la 1re version (port fixe) tourne encore : elle montre sa fenêtre
+        message_info("Une ancienne version d'Aplatir PDF est déjà lancée (icône près de l'horloge).\n\n"
+                     "Fermez-la d'abord (clic droit sur son icône, puis Quitter), puis relancez "
+                     "cette nouvelle version.")
+        return 0
+
+    verrou = None
+    ailleurs = False
+    try:
+        verrou = prendre_verrou()
+        ailleurs = verrou is None
+    except OSError:
+        log.warning("verrou d'instance impossible : on continue sans instance unique", exc_info=True)
+    if ailleurs:                        # une instance de ce profil tourne déjà
         message = {"cmd": "files", "paths": fichiers} if fichiers else {"cmd": "show"}
-        if prevenir_instance_existante(message):
+        rep = contacter_instance(message, attente=4.0)
+        if rep == "OK":
             return 0
-        log.warning("port occupé mais pas par Aplatir PDF : on continue sans instance unique")
+        if rep == "AUTRE":              # autre version (mise à jour de l'exe) : on lui demande de se fermer
+            demande = contacter_instance({"cmd": "quit"}, attente=2.0)
+            if demande == "OCCUPE":
+                message_info("Une autre version d'Aplatir PDF est en train de traiter des fichiers.\n"
+                             "Réessayez dans un instant.")
+                return 0
+            if demande == "OK":
+                fin = time.monotonic() + 10
+                while verrou is None and time.monotonic() < fin:
+                    time.sleep(0.3)
+                    try:
+                        verrou = prendre_verrou()
+                    except OSError:
+                        break
+        if verrou is None:
+            log.warning("une instance détient le verrou mais ne répond pas (réponse : %s) : on continue", rep)
+
+    serveur = jeton = None
+    try:
+        serveur, jeton = ouvrir_serveur()
+    except OSError:
+        log.warning("serveur d'instance indisponible", exc_info=True)
 
     activer_dpi_windows()
-    app = App(cache=args.tray, fichiers=fichiers, serveur=serveur)
-    log.info("démarrage (cache=%s, fichiers=%d)", args.tray, len(fichiers))
+    app = App(cache=args.tray, fichiers=fichiers, serveur=serveur, jeton=jeton)
+    log.info("démarrage version %s (cache=%s, fichiers=%d)", VERSION, args.tray, len(fichiers))
     app.lancer()
+    del verrou                          # gardé ouvert jusqu'ici : il relâche le verrou en se fermant
     return 0
 
 
 if __name__ == "__main__":
-    code = main()
-    # « Quitter » doit TOUJOURS arrêter le processus : le thread de l'icône de la zone de
-    # notification n'est pas un démon et pourrait sinon laisser un processus invisible.
-    logging.shutdown()
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code)
+    code = 1
+    try:
+        code = main()
+    except BaseException:
+        log.error("erreur fatale\n%s", traceback.format_exc())
+        message_info("Aplatir PDF a rencontré une erreur et doit fermer.\n"
+                     f"Détails dans le journal : {dossier_config() / 'aplatir.log'}")
+    finally:
+        # « Quitter » doit TOUJOURS arrêter le processus : le thread de l'icône de la zone de
+        # notification n'est pas un démon et pourrait sinon laisser un processus invisible.
+        logging.shutdown()
+        for flux in (sys.stdout, sys.stderr):
+            try:
+                flux.flush()
+            except Exception:
+                pass
+        os._exit(code)

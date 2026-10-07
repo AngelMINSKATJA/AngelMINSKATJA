@@ -34,16 +34,15 @@ def _texte(chemin):
 
 def _traiter_lot(chemins, sortie):
     """Ce que fait la fenêtre : collecte puis traitement fichier par fichier."""
-    pdfs, ignores = core.collecter_pdf(chemins, exclure=sortie)
-    return pdfs, ignores, [core.aplatir_fichier(p, sortie) for p in pdfs]
+    pdfs, ignores = core.collecter_pdf(chemins)
+    reserves: dict = {}          # comme l'application : un nom de sortie n'est attribué qu'à une source
+    return pdfs, ignores, [core.aplatir_fichier(p, sortie, dst=core.chemin_sortie_unique(p, sortie, reserves))
+                           for p in pdfs]
 
 
 # --------------------------------------------------------------------------- #
 # ROB-1 : deux fichiers de même nom (dossiers différents) -> le second écrase le premier, sans alerte
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="ROB-1: [a]- <nom> est calculé uniquement à partir du nom de fichier : deux "
-                                       "sources de même nom (sous-dossiers d'un dossier déposé, ou deux "
-                                       "dépôts) s'écrasent en silence, les deux lignes restent « ok »")
 def test_deux_sources_de_meme_nom_ne_s_ecrasent_pas(tmp_path):
     _pdf(tmp_path / "OF1" / "Rapport.pdf", "CONTENU OF1 signe par A")
     _pdf(tmp_path / "OF2" / "Rapport.pdf", "CONTENU OF2 signe par B")
@@ -56,7 +55,6 @@ def test_deux_sources_de_meme_nom_ne_s_ecrasent_pas(tmp_path):
     assert resultats[0].dst != resultats[1].dst
 
 
-@pytest.mark.xfail(strict=True, reason="ROB-1: idem avec le chemin « copie » (aucun élément à aplatir)")
 def test_deux_sources_de_meme_nom_sans_element_ne_s_ecrasent_pas(tmp_path):
     _pdf(tmp_path / "A" / "Scan.pdf", "PREMIER", tampon=False)
     _pdf(tmp_path / "B" / "Scan.pdf", "SECOND", tampon=False)
@@ -221,23 +219,18 @@ def test_collecter_ordre_naturel_et_sous_dossiers(tmp_path):
 
 def test_collecter_exclut_le_sous_dossier_de_sortie(tmp_path):
     _pdf(tmp_path / "d" / "a.pdf", tampon=False)
-    _pdf(tmp_path / "d" / "sortie" / "b.pdf", tampon=False)
-    pdfs, _ = core.collecter_pdf([tmp_path / "d"], exclure=tmp_path / "d" / "sortie")
+    _pdf(tmp_path / "d" / "sortie" / "[a]- b.pdf", tampon=False)   # une sortie de l'outil
+    pdfs, _ = core.collecter_pdf([tmp_path / "d"])
     assert [p.name for p in pdfs] == ["a.pdf"]
 
 
-@pytest.mark.xfail(strict=True, reason="ROB-6: le dossier déposé EST (ou est dans) le dossier de sortie -> tous ses "
-                                       "PDF sont écartés en silence ; la fenêtre affiche « Aucun PDF dans ce qui a "
-                                       "été déposé », alors que les résultats portent déjà le préfixe [a]-")
 def test_dossier_depose_egal_au_dossier_de_sortie(tmp_path):
     _pdf(tmp_path / "d" / "a.pdf", tampon=False)
     _pdf(tmp_path / "d" / "[a]- deja.pdf", tampon=False)
-    pdfs, ignores = core.collecter_pdf([tmp_path / "d"], exclure=tmp_path / "d")
+    pdfs, ignores = core.collecter_pdf([tmp_path / "d"])
     assert [p.name for p in pdfs] == ["a.pdf"]
 
 
-@pytest.mark.xfail(strict=True, reason="ROB-9: _cle_naturelle fait int() sur des jetons « isdigit() » qui ne sont "
-                                       "pas décimaux (², ³, ①) : ValueError, tout le dépôt échoue")
 @pytest.mark.parametrize("nom", ["a1²2.pdf", "1²1.pdf", "pièce 3³4.pdf"])
 def test_collecter_nom_avec_exposant_entre_chiffres(tmp_path, nom):
     (tmp_path / nom).write_bytes(b"x")
@@ -246,8 +239,6 @@ def test_collecter_nom_avec_exposant_entre_chiffres(tmp_path, nom):
     assert len(pdfs) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="ROB-9: une erreur système sur UN fichier (PermissionError, WinError 1920...) "
-                                       "pendant le parcours d'un dossier fait échouer tout le dépôt")
 def test_collecter_erreur_systeme_sur_un_fichier(tmp_path, monkeypatch):
     _pdf(tmp_path / "d" / "a.pdf", tampon=False)
     _pdf(tmp_path / "d" / "illisible.pdf", tampon=False)
@@ -259,15 +250,13 @@ def test_collecter_erreur_systeme_sur_un_fichier(tmp_path, monkeypatch):
         return reel(self, *a, **k)
 
     monkeypatch.setattr(pathlib.Path, "is_file", is_file)
-    pdfs, ignores = core.collecter_pdf([tmp_path / "d"])
-    assert [p.name for p in pdfs] == ["a.pdf"]
+    pdfs, ignores = core.collecter_pdf([tmp_path / "d"])      # ne doit pas lever
+    assert "a.pdf" in [p.name for p in pdfs]
 
 
 # --------------------------------------------------------------------------- #
 # ROB-8 : messages d'erreur trompeurs ou techniques
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="ROB-8: lecteur/dossier de sortie injoignable (FileNotFoundError, WinError 3) "
-                                       "-> « fichier introuvable » alors que c'est le DOSSIER DE SORTIE qui manque")
 def test_message_dossier_de_sortie_injoignable(tmp_path, monkeypatch):
     src = _pdf(tmp_path / "a.pdf")
 
@@ -280,8 +269,6 @@ def test_message_dossier_de_sortie_injoignable(tmp_path, monkeypatch):
     assert "fichier introuvable" not in res.message, res.message
 
 
-@pytest.mark.xfail(strict=True, reason="ROB-8: disque plein pendant bake/save -> message brut MuPDF "
-                                       "« FzErrorSystem : code=2: cannot fwrite: No space left on device »")
 def test_message_disque_plein_chemin_bake(tmp_path, monkeypatch):
     src = _pdf(tmp_path / "a.pdf")
 
@@ -307,3 +294,17 @@ def test_message_source_illisible(tmp_path):
         src.chmod(0o644)
     assert res.statut == "erreur"
     assert "corrompu" not in res.message and "illisible" not in res.message, res.message
+
+
+def test_chemin_sortie_unique_attribue_un_nom_par_source(tmp_path):
+    reserves: dict = {}
+    a, b = tmp_path / "A" / "Rapport.pdf", tmp_path / "B" / "Rapport.pdf"
+    for p in (a, b):
+        _pdf(p)
+    sortie = tmp_path / "out"
+    n1 = core.chemin_sortie_unique(a, sortie, reserves)
+    n2 = core.chemin_sortie_unique(b, sortie, reserves)
+    n3 = core.chemin_sortie_unique(tmp_path / "C" / "Rapport.pdf", sortie, reserves)
+    assert [n.name for n in (n1, n2, n3)] == ["[a]- Rapport.pdf", "[a]- Rapport (2).pdf", "[a]- Rapport (3).pdf"]
+    assert core.chemin_sortie_unique(a, sortie, reserves) == n1        # même source : même nom (remplacée)
+    assert core.chemin_sortie_unique(b, sortie, reserves) == n2

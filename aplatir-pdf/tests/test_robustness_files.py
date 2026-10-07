@@ -94,9 +94,6 @@ def test_mot_de_passe_proprietaire_seul_chemin_bake(tmp_path, enc):
         out.close()
 
 
-@pytest.mark.xfail(strict=True, reason="ROB-7: chemin « copie » : un PDF à mot de passe propriétaire seul est copié "
-                                       "tel quel, restrictions (assemblage interdit) comprises, alors que le chemin "
-                                       "bake produit un fichier sans restriction")
 def test_mot_de_passe_proprietaire_seul_chemin_copie(tmp_path):
     src = _ecrire(_doc(1, tampon_sur=()), tmp_path / "proprio.pdf", encryption=pymupdf.PDF_ENCRYPT_AES_256,
                   user_pw="", owner_pw="def", permissions=pymupdf.PDF_PERM_PRINT)
@@ -186,8 +183,6 @@ def test_mutations_aleatoires_ne_plantent_jamais(tmp_path):
 # --------------------------------------------------------------------------- #
 # ROB-5 : fichier source endommagé (réparé par MuPDF) traité comme un fichier sain
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="ROB-5: un PDF tronqué/corrompu réparé par MuPDF (Document.is_repaired) perd "
-                                       "des signatures/annotations mais le statut reste « ok »/« securite »")
 def test_source_tronquee_reparee_est_signalee(tmp_path):
     base = tmp_path / "base.pdf"
     d = _doc(6, tampon_sur=())
@@ -281,9 +276,6 @@ def test_signets_nommes_chemin_normal(tmp_path):
         out.close()
 
 
-@pytest.mark.xfail(strict=True, reason="ROB-4: repli image -> get_toc/set_toc transforme les signets à destination "
-                                       "NOMMÉE en signets morts (même vers des pages non remplacées) et la "
-                                       "destination nommée de la page remplacée pointe dans le vide")
 def test_signets_nommes_apres_repli_image(tmp_path, monkeypatch):
     src = _doc_signets_nommes(tmp_path / "nommes.pdf")
     _forcer_repli(monkeypatch)
@@ -315,9 +307,6 @@ def test_toc_et_pieces_jointes_apres_repli_image(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 # ROB-2 : repli image -> chaque page convertie reste en mémoire NON compressée jusqu'à l'enregistrement
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="ROB-2: insert_image(pixmap=...) garde 3 octets/pixel par page convertie "
-                                       "(≈ 11,6 Mo par page A4 à 200 dpi : 500 pages -> 5,6 Go de RAM) ; "
-                                       "il faut ajouter l'image déjà compressée (Flate)")
 def test_pages_converties_stockees_compressees_en_memoire():
     d = _doc(3)
     orig = pymupdf.open("pdf", d.tobytes())

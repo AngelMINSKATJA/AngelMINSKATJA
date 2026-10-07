@@ -56,14 +56,10 @@ def test_artefact_telecharge_est_celui_envoye(wf):
     assert len(noms) == 2 and len(set(noms)) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="PKG-3: Start-Process -Wait sans délai : un plantage de l'exe fenêtré "
-                                       "ouvre la boîte de dialogue modale de PyInstaller et bloque le job "
-                                       "jusqu'au délai par défaut de 360 min")
 def test_job_build_a_un_delai_maximal(wf):
     assert "timeout-minutes" in wf["jobs"]["build"]
 
 
-@pytest.mark.xfail(strict=True, reason="PKG-4: actions ciblant Node 20 (obsolète, avertissement dans le journal CI)")
 def test_actions_sans_node20(wf):
     anciennes = []
     for u in _utilisations(wf):
@@ -73,7 +69,5 @@ def test_actions_sans_node20(wf):
     assert not anciennes, anciennes
 
 
-@pytest.mark.xfail(strict=True, reason="PKG-5: le filtre de branche ne contient que la branche de travail "
-                                       "temporaire : après fusion, un push sur main ne fabrique plus d'exe")
 def test_push_sur_la_branche_par_defaut_declenche_la_fabrication(wf):
     assert "main" in _declencheurs(wf)["push"]["branches"]

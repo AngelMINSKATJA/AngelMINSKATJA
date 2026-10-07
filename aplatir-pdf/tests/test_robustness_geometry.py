@@ -157,8 +157,6 @@ def test_cropbox_heritee_chemin_normal(tmp_path):
     _meme_rendu(src, res.dst)
 
 
-@pytest.mark.xfail(strict=True, reason="ROB-3: repli image -> la nouvelle page n'a pas de /CropBox propre et hérite "
-                                       "de celui du nœud /Pages : l'image est rognée (20 pt à gauche, 30 pt en bas)")
 def test_cropbox_heritee_repli_image(tmp_path, monkeypatch):
     src = _pdf_cropbox_heritee(tmp_path / "h.pdf")
     _forcer_repli(monkeypatch)

@@ -366,16 +366,12 @@ def _pdf_champ_vide_sans_ap(tmp_path):
     return ecrire(d, tmp_path / "in.pdf")
 
 
-@pytest.mark.xfail(strict=True, reason="SIG-1: bake() grave la pastille d'interface « SIGN » de MuPDF dans la page "
-                                       "pour chaque champ de signature vide sans /AP, statut « ok »")
 def test_champ_signature_vide_sans_ap_pas_de_pastille_sign_dans_le_resultat(tmp_path):
     res = core.aplatir_fichier(_pdf_champ_vide_sans_ap(tmp_path), tmp_path / "out")
     assert res.statut == "ok"
     assert _zone_uniforme(res.dst, RECT) == 0      # le champ vide doit rester le fond de la page, sans artefact
 
 
-@pytest.mark.xfail(strict=True, reason="SIG-1: la conversion en image (mode sécurité) rend aussi la pastille « SIGN » "
-                                       "des champs non signés, et perd l'apparence des champs vides ayant un /AP")
 def test_conversion_en_image_ne_grave_pas_la_pastille_sign(tmp_path, monkeypatch):
     src = _pdf_champ_vide_sans_ap(tmp_path)
 
@@ -387,8 +383,6 @@ def test_conversion_en_image_ne_grave_pas_la_pastille_sign(tmp_path, monkeypatch
     assert _zone_uniforme(res.dst, RECT) == 0
 
 
-@pytest.mark.xfail(strict=True, reason="SIG-2: /Perms /DocMDP (certification) reste dans le catalogue du résultat, "
-                                       "orphelin, et le statut est « ok »")
 @pytest.mark.parametrize("visible", [True, False])
 def test_document_certifie_perms_docmdp_supprime(tmp_path, visible):
     d = nouveau_doc(1)
@@ -425,8 +419,6 @@ def test_tampon_posterieur_recouvrant_une_signature_reste_au_dessus(tmp_path):
     assert verifier_pixels(res.dst, [(0, "tampon sur signature", (260, 625), VERT)]) == []
 
 
-@pytest.mark.xfail(strict=True, reason="SIG-4: Resultat.signatures / le message comptent aussi les champs de signature "
-                                       "vides (« 2 signature(s) » pour 1 signée + 1 vide)")
 def test_nombre_de_signatures_ne_compte_que_les_signees(tmp_path):
     d = nouveau_doc(1)
     ajouter_signature(d, d[0], (100, 600, 300, 650), "Signee", ap=apparence(d, 200, 50))

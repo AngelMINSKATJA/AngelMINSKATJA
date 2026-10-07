@@ -122,10 +122,6 @@ def lot_de_rapports(faire_app, tmp_path):
     return app, noms
 
 
-@pytest.mark.xfail(strict=True, reason="REQ-1: la colonne « Fichier » est figée à 200 px (stretch=False) : quatre "
-                                       "rapports « Rapport de Fin de Fabrication OF-2024-00123/124/125/126 - ... » "
-                                       "affichent exactement le même début, même fenêtre agrandie ; le nom de sortie "
-                                       "(« Détail ») est tronqué lui aussi à la taille par défaut")
 def test_les_lignes_de_la_liste_sont_distinguables(lot_de_rapports):
     from tkinter import font as tkfont
     app, noms = lot_de_rapports
@@ -144,10 +140,6 @@ def test_les_lignes_de_la_liste_sont_distinguables(lot_de_rapports):
 # --------------------------------------------------------------------------- #
 # REQ-2 : « reste dans la barre des tâches » : fermer la fenêtre ne doit pas faire disparaître l'outil sans un mot
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="REQ-2: la croix appelle masquer() (withdraw) : plus aucun bouton dans la "
-                                       "barre des tâches et aucune notification « l'outil reste actif près de "
-                                       "l'horloge » ; sous Windows 11 l'icône est de plus dans le menu « ^ » masqué "
-                                       "par défaut : l'utilisateur croit avoir quitté ou ne retrouve plus l'outil")
 def test_fermer_la_fenetre_previent_ou_reste_dans_la_barre_des_taches(faire_app):
     app = faire_app(icone=True)
     app.afficher()

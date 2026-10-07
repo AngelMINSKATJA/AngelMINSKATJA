@@ -2,7 +2,7 @@ name: Build AplatirPDF.exe
 
 on:
   push:
-    branches: ["claude/pdf-signature-flattener-qwp90y"]
+    branches: [main, "claude/pdf-signature-flattener-qwp90y"]
     paths:
       - "aplatir-pdf/**"
       - ".github/workflows/build-aplatir-pdf.yml"
@@ -15,13 +15,14 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: aplatir-pdf
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -33,22 +34,32 @@ jobs:
       - name: Tests
         run: python -m pytest -q
 
-      - name: Fabriquer l'exécutable
+      - name: Fabriquer l'exécutable (build.py lance aussi l'auto-test)
+        env:
+          APLATIR_VERSION: ${{ github.run_number }}-${{ substr(github.sha, 0, 7) }}
+          APLATIR_SANS_DIALOGUE: "1"
         run: python build.py
 
       - name: Auto-test de l'exe (sans interface)
         shell: pwsh
+        env:
+          APLATIR_SANS_DIALOGUE: "1"
         run: |
           $rapport = Join-Path $PWD "selftest.txt"
-          $p = Start-Process -FilePath ".\dist\AplatirPDF.exe" -ArgumentList "--selftest", "`"$rapport`"" -Wait -PassThru
+          $p = Start-Process -FilePath ".\dist\AplatirPDF.exe" -ArgumentList "--selftest", "`"$rapport`"" -PassThru
+          if (-not $p.WaitForExit(120000)) {
+            try { $p.Kill($true) } catch {}
+            throw "L'auto-test ne répond pas (boîte de dialogue ?)"
+          }
           if (Test-Path $rapport) { Get-Content $rapport } else { Write-Host "Aucun rapport écrit" }
           if ($p.ExitCode -ne 0) { throw "L'auto-test a échoué (code $($p.ExitCode))" }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: AplatirPDF-windows
           path: aplatir-pdf/dist/AplatirPDF.exe
           if-no-files-found: error
+          retention-days: 90
 
   release:
     # Uniquement quand on pousse une étiquette « aplatir-pdf-vX.Y » : publie l'exe en téléchargement direct
@@ -58,9 +69,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: AplatirPDF-windows
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: AplatirPDF.exe
+          fail_on_unmatched_files: true

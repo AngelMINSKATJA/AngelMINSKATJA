@@ -64,7 +64,7 @@ def test_plusieurs_pdf_deposes_tous_produits_et_originaux_intacts(tmp_path):
                _pdf(tmp_path / "in" / "C trois pages.pdf", pages=3, tamponnees=(2, 3))]
     avant = {p: _sha(p) for p in sources}
     sortie = tmp_path / "sortie"
-    pdfs, ignores = core.collecter_pdf(sources, exclure=sortie)
+    pdfs, ignores = core.collecter_pdf(sources)
     assert pdfs == sources and not ignores
     resultats = [core.aplatir_fichier(p, sortie) for p in pdfs]
     assert [r.statut for r in resultats] == ["ok", "copie", "ok"]
@@ -100,9 +100,6 @@ def test_readme_cite_les_memes_noms_que_le_code_et_la_ci():
 # --------------------------------------------------------------------------- #
 # REQ-3 : le rapport d'origine donnait, fichier par fichier, les PAGES portant une signature
 # --------------------------------------------------------------------------- #
-@pytest.mark.xfail(strict=True, reason="REQ-3: l'ancien script listait « page N: SIGNATURE ... » par fichier "
-                                       "(aplatir_rapport.txt) ; ici le message affiché ne donne qu'un NOMBRE de "
-                                       "pages (« 3 page(s) traitée(s) »), les numéros ne sont que dans le journal")
 def test_le_message_donne_les_numeros_de_pages_traitees(tmp_path):
     src = _pdf(tmp_path / "in" / "r.pdf", pages=6, tamponnees=(2, 4, 5))
     res = core.aplatir_fichier(src, tmp_path / "out")
