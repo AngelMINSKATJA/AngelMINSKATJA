@@ -114,6 +114,7 @@ def test_chemin_de_sortie_trop_long_message_clair(tmp_path, monkeypatch):
 
     monkeypatch.setattr(core.os, "replace", win32_sans_chemins_longs)
     monkeypatch.setattr(sys, "platform", "win32")  # active les éventuelles branches « Windows » du correctif
+    monkeypatch.setattr(core, "_chemins_longs_actifs", lambda: False)   # Windows par défaut (les runners de CI l'activent)
     res = core.aplatir_fichier(src, out)
     # soit le fichier est écrit (préfixe « \\?\ »), soit l'erreur dit la vraie cause
     if res.statut == "erreur":
