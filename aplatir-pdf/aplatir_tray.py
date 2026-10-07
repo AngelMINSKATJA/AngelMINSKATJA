@@ -10,7 +10,7 @@ le dossier de sortie choisi.
 Options de la ligne de commande :
     --tray            démarre caché dans la zone de notification (utilisé au démarrage de Windows)
     --selftest FICHIER  auto-test sans interface utilisateur, rapport écrit dans FICHIER
-    fichier.pdf ...   PDF à traiter tout de suite (glisser des PDF sur l'exe, « Envoyer vers »...)
+    fichier.pdf ...   PDF à traiter tout de suite (glisser des PDF sur l'icône de l'exe)
 """
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ import json
 import logging
 import logging.handlers
 import queue
+import re
 import secrets
 import socket
 import subprocess
@@ -68,6 +69,7 @@ ID_APP = "AplatirPDF"
 PORT_ANCIEN = 47653      # port fixe réservé par les toutes premières versions
 FICHIER_VERROU = "instance.lock"
 FICHIER_INSTANCE = "instance.json"
+FICHIER_SORTIES = "sorties.json"
 CLE_RUN = r"Software\Microsoft\Windows\CurrentVersion\Run"
 CLE_APPROUVE = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 DEFAUTS = {"sortie": "", "demarrage_auto": True, "premier_plan": True, "securite": True,
@@ -121,6 +123,31 @@ class Config:
     def __setitem__(self, cle, valeur):
         self.valeurs[cle] = valeur
         self.sauver()
+
+
+def charger_reserves() -> dict:
+    """Noms de sortie déjà attribués (chemin de sortie -> source), mémorisés d'un lancement à
+    l'autre : sans cela, après un redémarrage, un autre « Rapport.pdf » écraserait la sortie
+    du précédent. Les entrées dont le fichier n'existe plus sont oubliées."""
+    try:
+        data = json.loads((dossier_config() / FICHIER_SORTIES).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str) and os.path.exists(k)}
+
+
+def sauver_reserves(reserves: dict) -> None:
+    try:
+        d = dossier_config()
+        d.mkdir(parents=True, exist_ok=True)
+        recentes = dict(list(reserves.items())[-5000:])
+        tmp = d / (FICHIER_SORTIES + ".tmp")
+        tmp.write_text(json.dumps(recentes, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, d / FICHIER_SORTIES)
+    except OSError:
+        log.warning("impossible d'enregistrer les noms de sortie", exc_info=True)
 
 
 def configurer_journal() -> None:
@@ -245,7 +272,14 @@ def ouvrir_serveur(dossier: Path | None = None):
         d.mkdir(parents=True, exist_ok=True)
         tmp = d / (FICHIER_INSTANCE + ".tmp")
         tmp.write_text(json.dumps(info), encoding="utf-8")
-        os.replace(tmp, d / FICHIER_INSTANCE)
+        for essai in range(6):          # un antivirus peut tenir le fichier un instant
+            try:
+                os.replace(tmp, d / FICHIER_INSTANCE)
+                break
+            except PermissionError:
+                if essai == 5:
+                    raise
+                time.sleep(0.1 * (essai + 1))
     except OSError:
         s.close()
         raise
@@ -331,6 +365,22 @@ def servir_instance(serveur: socket.socket, jeton: str, poster, occupe=lambda: F
                 log.warning("message d'instance invalide", exc_info=True)
 
 
+def version_publiee(dossier: Path | None = None) -> str:
+    """Version de l'instance qui tourne, telle qu'elle l'a publiée dans ``instance.json``."""
+    d = Path(dossier) if dossier else dossier_config()
+    try:
+        return str(json.loads((d / FICHIER_INSTANCE).read_text(encoding="utf-8")).get("version", ""))
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def instance_plus_recente(ma_version: str, autre: str) -> bool:
+    """Vrai si l'instance qui tourne (``autre``) est plus récente que moi. Les versions de la CI sont
+    « numéro de fabrication-commit » ; sans numéro (« dev », « local-… ») on ne présume de rien."""
+    m1, m2 = re.match(r"^(\d+)-", ma_version or ""), re.match(r"^(\d+)-", autre or "")
+    return bool(m1 and m2 and int(m2.group(1)) > int(m1.group(1)))
+
+
 def ancienne_version_active() -> bool:
     """Les toutes premières versions réservaient le port fixe 47653 et répondaient OK à tout :
     on le détecte pour demander de les fermer plutôt que d'ouvrir une 2e icône."""
@@ -391,7 +441,9 @@ class App:
         if premiere_fois:
             self.cfg.sauver()
         self.jeton = jeton
-        self.reserves: dict = {}                    # noms de sortie déjà attribués dans cette session
+        self.reserves: dict = charger_reserves()    # noms de sortie déjà attribués (mémorisés)
+        self.sources: dict = {}                     # ligne de la liste -> chemin complet de la source
+        self._ferme = False
 
         self.evenements: queue.Queue = queue.Queue()   # tout ce qui doit toucher à l'interface
         self.jobs: queue.Queue = queue.Queue()
@@ -423,7 +475,7 @@ class App:
 
     @staticmethod
     def _stats_vides() -> dict:
-        return {"ok": 0, "copie": 0, "alerte": 0, "erreur": 0, "ignore": 0}
+        return {"ok": 0, "copie": 0, "image": 0, "alerte": 0, "erreur": 0, "ignore": 0}
 
     # ----- interface ------------------------------------------------------- #
     def _px(self, v: int) -> int:
@@ -432,8 +484,11 @@ class App:
     def _construire(self) -> None:
         r = self.root
         r.title(NOM_APP if VERSION == "dev" else f"{NOM_APP} — version {VERSION}")
-        r.geometry(f"{self._px(900)}x{self._px(580)}")
-        r.minsize(self._px(560), self._px(440))
+        # fenêtre jamais plus grande que l'écran (écran très zoomé : boutons sinon hors de l'écran)
+        larg = min(self._px(900), r.winfo_screenwidth() - self._px(40))
+        haut = min(self._px(580), r.winfo_screenheight() - self._px(120))
+        r.geometry(f"{larg}x{haut}")
+        r.minsize(min(self._px(560), larg), min(self._px(440), haut))
         try:
             self._img_icone = tk.PhotoImage(data=icone_png_base64(64))
             r.iconphoto(True, self._img_icone)
@@ -485,6 +540,7 @@ class App:
         asc = ttk.Scrollbar(cadre, orient="vertical", command=self.arbre.yview)
         asc.grid(row=0, column=1, sticky="ns")
         self.arbre.configure(yscrollcommand=asc.set)
+        self.arbre.bind("<<TreeviewSelect>>", self._montrer_detail)
 
         # boutons
         boutons = ttk.Frame(main)
@@ -522,6 +578,15 @@ class App:
         self.zone.dnd_bind("<<DropEnter>>", self._on_drop_enter)
         self.zone.dnd_bind("<<DropLeave>>", self._on_drop_leave)
         self._maj_premier_plan()
+
+    def _montrer_detail(self, _evenement=None) -> None:
+        """Une ligne sélectionnée : son texte complet (la colonne « Détail » coupe les longs messages)."""
+        sel = self.arbre.selection()
+        if len(sel) != 1 or not self.arbre.exists(sel[0]):
+            return
+        fichier, statut, detail = self.arbre.item(sel[0], "values")[:3]
+        source = self.sources.get(sel[0])
+        self.var_statut.set(f"{source or fichier}  —  {statut} : {detail}")
 
     def _maj_texte_zone(self) -> None:
         if self.cfg["sortie"]:
@@ -625,6 +690,7 @@ class App:
 
     def _message_instance(self, msg: dict) -> None:
         if msg.get("cmd") == "files":
+            self._poster("afficher")        # sinon un dépôt sur l'exe se fait sans aucun retour visible
             self._poster("fichiers", [str(p) for p in msg.get("paths", [])])
         elif msg.get("cmd") == "quit":      # une autre version de l'exe demande la place
             self._poster("quitter_force")
@@ -760,9 +826,11 @@ class App:
         for p in pdfs:
             dst = core.chemin_sortie_unique(p, sortie, self.reserves)   # 2 sources de même nom : « (2) »
             iid = self.arbre.insert("", "end", values=(p.name, "⏳ En attente", str(p.parent)), tags=("attente",))
+            self.sources[iid] = p
             self.arbre.see(iid)
             self.en_cours += 1
             self.jobs.put((iid, p, sortie, bool(self.cfg["securite"]), dst))
+        sauver_reserves(self.reserves)
         self.var_statut.set(f"{self.en_cours} fichier(s) en cours de traitement…")
 
     def _boucle_travail(self) -> None:
@@ -782,11 +850,12 @@ class App:
         self.en_cours = max(0, self.en_cours - 1)
         texte, tag = LIBELLES.get(res.statut, LIBELLES["erreur"])
         detail = res.message
-        if res.statut in ("ok", "copie", "securite", "alerte") and res.dst is not None:
-            detail = f"{res.message}  →  {res.dst.name}"
+        if res.dst is not None and res.statut in ("ok", "copie", "securite", "alerte") \
+                and res.dst.name != core.PREFIXE + res.src.name:
+            detail = f"→ {res.dst.name} ; {res.message}"      # le nom habituel va de soi : on ne signale que « (2) »
         if self.arbre.exists(iid):
             self.arbre.item(iid, values=(res.src.name, texte, detail), tags=(tag,))
-        cle = {"ok": "ok", "copie": "copie", "securite": "alerte", "alerte": "alerte",
+        cle = {"ok": "ok", "copie": "copie", "securite": "image", "alerte": "alerte",
                "ignore": "ignore"}.get(res.statut, "erreur")
         self.stats[cle] += 1
         log.info("%s | %s | %s | signatures=%s pages=%s image=%s", res.statut, res.src, detail,
@@ -801,6 +870,8 @@ class App:
         morceaux = [f"{s['ok']} aplati(s)"]
         if s["copie"]:
             morceaux.append(f"{s['copie']} copié(s) (rien à aplatir)")
+        if s["image"]:
+            morceaux.append(f"{s['image']} avec page(s) convertie(s) en image")
         if s["alerte"]:
             morceaux.append(f"{s['alerte']} à vérifier")
         if s["erreur"]:
@@ -809,12 +880,18 @@ class App:
             morceaux.append(f"{s['ignore']} ignoré(s)")
         msg = "Terminé : " + ", ".join(morceaux) + "."
         self.var_statut.set(msg)
+        problemes = [i for i in self.arbre.get_children() if {"alerte", "erreur"} & set(self.arbre.item(i, "tags"))]
+        if problemes:
+            self.arbre.see(problemes[0])        # une longue liste défile jusqu'à la 1re ligne à regarder
         self.notifier(msg)
 
     def quitter(self, confirmer: bool = True) -> None:
+        if self._ferme:                     # 2e demande (ex. « Quitter » + demande d'une autre version)
+            return
         if confirmer and self.en_cours and not messagebox.askyesno(
                 NOM_APP, "Un aplatissement est en cours.\nQuitter quand même ?", parent=self.root):
             return
+        self._ferme = True
         oublier_serveur(self.jeton)
         try:
             if self.icone is not None:
@@ -966,33 +1043,45 @@ def main(argv: list | None = None) -> int:
         return 0
 
     verrou = None
-    ailleurs = False
     try:
         verrou = prendre_verrou()
-        ailleurs = verrou is None
     except OSError:
         log.warning("verrou d'instance impossible : on continue sans instance unique", exc_info=True)
-    if ailleurs:                        # une instance de ce profil tourne déjà
+        verrou = False                  # distinct de None : pas de négociation possible
+    if verrou is None:                  # une instance de ce profil tourne déjà : on négocie, de façon bornée
         message = {"cmd": "files", "paths": fichiers} if fichiers else {"cmd": "show"}
-        rep = contacter_instance(message, attente=4.0)
-        if rep == "OK":
-            return 0
-        if rep == "AUTRE":              # autre version (mise à jour de l'exe) : on lui demande de se fermer
-            demande = contacter_instance({"cmd": "quit"}, attente=2.0)
-            if demande == "OCCUPE":
-                message_info("Une autre version d'Aplatir PDF est en train de traiter des fichiers.\n"
-                             "Réessayez dans un instant.")
+        fin = time.monotonic() + 15
+        quit_demande = False
+        premier_tour = True
+        while True:
+            rep = contacter_instance(message, attente=4.0 if premier_tour else 0.5)
+            premier_tour = False
+            if rep == "OK":
                 return 0
-            if demande == "OK":
-                fin = time.monotonic() + 10
-                while verrou is None and time.monotonic() < fin:
-                    time.sleep(0.3)
-                    try:
-                        verrou = prendre_verrou()
-                    except OSError:
-                        break
-        if verrou is None:
-            log.warning("une instance détient le verrou mais ne répond pas (réponse : %s) : on continue", rep)
+            if rep == "AUTRE" and not quit_demande:
+                autre = version_publiee()
+                if instance_plus_recente(VERSION, autre):
+                    message_info(f"Une version plus récente d'Aplatir PDF (version {autre}) est déjà lancée "
+                                 "(icône près de l'horloge).\nVous venez d'ouvrir un ancien exe : "
+                                 "supprimez-le et utilisez le plus récent.")
+                    return 0
+                demande = contacter_instance({"cmd": "quit"}, attente=2.0)
+                if demande == "OCCUPE":
+                    message_info("Une autre version d'Aplatir PDF est en train de traiter des fichiers.\n"
+                                 "Réessayez dans un instant.")
+                    return 0
+                quit_demande = demande == "OK"
+            try:
+                verrou = prendre_verrou()   # l'ancienne instance a-t-elle libéré la place ?
+            except OSError:
+                verrou = False
+                break
+            if verrou is not None:
+                break
+            if time.monotonic() > fin:
+                log.warning("une instance détient le verrou mais ne répond pas (réponse : %s) : on continue", rep)
+                break
+            time.sleep(0.3)
 
     serveur = jeton = None
     try:

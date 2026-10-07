@@ -19,8 +19,12 @@ Un runner Windows de GitHub fabrique l'exe et le teste automatiquement :
    (par exemple `C:\Outils\AplatirPDF\`) puis lancez-le **depuis cet emplacement** (pas depuis le `.zip`).
    Le démarrage automatique mémorise cet emplacement : s'il change, relancez l'exe une fois à la main.
 
-Les fichiers téléchargés depuis Actions sont conservés **90 jours**. Passé ce délai, cliquez sur
-**Run workflow** (même onglet Actions) pour en fabriquer un nouveau.
+Les fichiers téléchargés depuis Actions sont conservés **90 jours**. Passé ce délai, il faut en
+fabriquer un nouveau : bouton **Run workflow** de ce même onglet (il n'apparaît qu'une fois la branche
+fusionnée dans `main`), ou nouveau commit. Pour un **lien permanent**, poussez une étiquette
+`aplatir-pdf-v1.0` : l'exe est alors publié sur la page **Releases** du dépôt, sans limite de durée.
+Les versions des bibliothèques sont **épinglées** (`requirements.txt`) : une nouvelle fabrication
+embarque exactement le même moteur PDF que les précédentes.
 
 Alternative : sur un PC Windows avec Python 3.10+ installé, double-cliquez sur
 `build_windows.bat` ; l'exe est créé dans le dossier `dist`.
@@ -58,6 +62,12 @@ et la recocher le réactive.
 La case **« Garder la fenêtre au premier plan »** (cochée par défaut) évite que la fenêtre passe sous
 l'Explorateur pendant que vous cherchez vos fichiers ; décochez-la si elle vous gêne.
 
+La case **« Sécurité : convertir en image une page si l'aplatissement altère son aspect »** (cochée par
+défaut) est la protection principale : si l'aplatissement normal change l'aspect d'une page (signature
+perdue, tampon caché qui devient visible…), la page est remplacée par une image fidèle — ligne
+⚠ *Aplati (image)*. Décochée, la page reste telle quelle et la ligne devient ⚠ *À vérifier* :
+à contrôler à la main.
+
 Lancer l'exe une 2ᵉ fois ne démarre pas une 2ᵉ copie : cela ramène simplement la fenêtre.
 Glisser des PDF **directement sur l'icône du fichier `.exe`** les traite aussi.
 
@@ -67,18 +77,21 @@ Glisser des PDF **directement sur l'icône du fichier `.exe`** les traite aussi.
 |---|---|
 | ✔ **Aplati** | Signatures, tampons, annotations, champs gravés ; la ligne indique les **pages** concernées. |
 | ✔ **Copié** | Rien à aplatir dans ce PDF : il est simplement copié sous le nouveau nom. |
-| ⚠ **Aplati (image)** | Pour certaines pages, l'aplatissement normal changeait l'aspect : elles ont été **converties en image** (200 dpi, texte non sélectionnable) pour être fidèles. |
+| ⚠ **Aplati (image)** | Normal et sans gravité : pour certaines pages, l'aplatissement normal changeait l'aspect : elles ont été **converties en image** (200 dpi, texte non sélectionnable) pour être fidèles. |
 | ⚠ **À vérifier** | Ouvrez le PDF produit et contrôlez les pages citées (aspect différent, fichier source réparé automatiquement car abîmé, éléments restants…). |
 | ✖ **Erreur** | Le fichier n'a pas été produit ; le message dit pourquoi (mot de passe, fichier abîmé, fichier de sortie ouvert dans Acrobat, formulaire XFA…). |
 | — **Ignoré** | Ce n'est pas un PDF, ou son nom commence déjà par `[a]- `. |
 
 Après l'enregistrement, l'outil **relit le fichier écrit** et le compare à l'original, page par page.
+Les messages longs sont coupés dans la colonne « Détail » : **cliquez sur la ligne** pour lire le texte complet
+(avec le chemin du fichier source) dans la barre d'état en bas.
 
 ## Précisions
 
 - **Noms en double** : si deux PDF de même nom viennent de dossiers différents (`OF-1\Rapport.pdf` et
-  `OF-2\Rapport.pdf`), le second devient `[a]- Rapport (2).pdf` — aucun n'écrase l'autre. Reglisser *le même*
-  fichier le remplace (la ligne le précise).
+  `OF-2\Rapport.pdf`), le second devient `[a]- Rapport (2).pdf` — aucun n'écrase l'autre. Redéposer *le même*
+  fichier le remplace (la ligne le précise). Cette mémoire est conservée d'un lancement à l'autre ;
+  un fichier déjà présent dans le dossier de sortie sans qu'on sache d'où il vient n'est jamais écrasé non plus.
 - **Signature numérique (certificat)** : elle perd sa valeur cryptographique en étant aplatie ; seule son apparence
   est conservée. C'est le but ici, mais gardez les originaux signés si vous devez prouver l'authenticité.
 - **Formulaires XFA dynamiques** (Adobe LiveCycle) : leur contenu n'est pas dans les pages, l'outil le refuse. Ouvrez-les
@@ -95,6 +108,7 @@ Après l'enregistrement, l'outil **relit le fichier écrit** et le compare à l'
 |---|---|
 | `%APPDATA%\AplatirPDF\config.json` | vos réglages (dossier de sortie, options) |
 | `%APPDATA%\AplatirPDF\aplatir.log` | journal détaillé (bouton **Journal**) |
+| `%APPDATA%\AplatirPDF\sorties.json` | mémoire des noms de sortie (pour ne jamais écraser un autre fichier) |
 
 Pour désinstaller : décochez « Lancer au démarrage de Windows », cliquez **Quitter**, puis supprimez `AplatirPDF.exe`
 et le dossier `%APPDATA%\AplatirPDF`. Rien d'autre n'est installé.

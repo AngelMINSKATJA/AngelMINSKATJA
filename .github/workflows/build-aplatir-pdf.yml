@@ -29,10 +29,18 @@ jobs:
           cache-dependency-path: aplatir-pdf/requirements*.txt
 
       - name: Installer les dépendances
-        run: python -m pip install -r requirements-dev.txt
+        run: python -m pip install -r requirements-test.txt
 
-      - name: Tests
-        run: python -m pytest -q
+      - name: Tests (l option -rs affiche pourquoi certains sont ignorés)
+        run: python -m pytest -q -rs
+
+      - name: Tests d'interface sous Windows (informatif tant qu'ils n'ont pas été vus verts)
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          APLATIR_GUI_TESTS: "1"
+          APLATIR_SANS_DIALOGUE: "1"
+        run: python -m pytest -q -rs tests/test_gui_app.py tests/test_windows_gui.py tests/test_requirements_gui.py tests/test_gui_process.py
 
       - name: Numéro de version (affiché dans la fenêtre)
         shell: pwsh
@@ -50,6 +58,7 @@ jobs:
           APLATIR_SANS_DIALOGUE: "1"
         run: |
           $rapport = Join-Path $PWD "selftest.txt"
+          Remove-Item $rapport -ErrorAction SilentlyContinue      # jamais de rapport périmé
           $p = Start-Process -FilePath ".\dist\AplatirPDF.exe" -ArgumentList "--selftest", "`"$rapport`"" -PassThru
           if (-not $p.WaitForExit(120000)) {
             try { $p.Kill($true) } catch {}
@@ -64,6 +73,27 @@ jobs:
           path: aplatir-pdf/dist/AplatirPDF.exe
           if-no-files-found: error
           retention-days: 90
+
+  tests-linux:
+    # Tests croisés que Windows ne fait pas : qpdf, pdfunite, poppler + toute l'interface sous Xvfb
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: aplatir-pdf
+    steps:
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils xvfb python3-tk python3-venv
+      - name: Environnement de test
+        run: |
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/python -m pip install -r requirements-test.txt
+      - name: Tests (interface comprise, sous Xvfb)
+        env:
+          APLATIR_GUI_TESTS: "1"
+          APLATIR_SANS_DIALOGUE: "1"
+        run: xvfb-run -a .venv/bin/python -m pytest -q -rs
 
   release:
     # Uniquement quand on pousse une étiquette « aplatir-pdf-vX.Y » : publie l'exe en téléchargement direct

@@ -326,7 +326,7 @@ def test_lot_de_60_fichiers_compteurs_et_reactivite(fabrique, tmp_path):
     assert time.time() - t0 < 2.0                  # ajouter() ne traite rien lui-même
     assert app.en_cours == 61
     assert _pomper(app, lambda: app.en_cours == 0, 60)
-    assert app.stats == {"ok": 30, "copie": 30, "alerte": 0, "erreur": 1, "ignore": 0}   # 30 sans tampon : copiés
+    assert app.stats == {"ok": 30, "copie": 30, "image": 0, "alerte": 0, "erreur": 1, "ignore": 0}   # 30 sans tampon : copiés
     assert app.var_statut.get() == "Terminé : 30 aplati(s), 30 copié(s) (rien à aplatir), 1 erreur(s)."
     assert len(list(sortie.glob("[[]a[]]- *.pdf"))) == 60
     assert len(_lignes(app)) == 61 and not any("attente" in str(app.arbre.item(i, "tags"))
@@ -379,7 +379,7 @@ def test_exception_dans_le_worker_est_une_ligne_erreur_et_le_worker_continue(fab
 @pytest.mark.parametrize("statut, dst, texte, tag, cle", [
     ("ok", True, "✔ Aplati", "ok", "ok"),
     ("copie", True, "✔ Copié", "ok", "copie"),
-    ("securite", True, "⚠ Aplati (image)", "alerte", "alerte"),
+    ("securite", True, "⚠ Aplati (image)", "alerte", "image"),
     ("alerte", True, "⚠ À vérifier", "alerte", "alerte"),
     ("ignore", False, "— Ignoré", "ignore", "ignore"),
     ("erreur", False, "✖ Erreur", "erreur", "erreur"),
@@ -394,7 +394,7 @@ def test_fin_pour_chaque_statut(fabrique, tmp_path, statut, dst, texte, tag, cle
     app._fin(iid, res)
     v = app.arbre.item(iid, "values")
     assert v[1] == texte and tag in app.arbre.item(iid, "tags")
-    assert ("→  [a]- x.pdf" in v[2]) == bool(dst)
+    assert "→" not in v[2]                  # nom de sortie habituel (préfixe + nom) : pas de flèche
     assert app.stats[cle] == 1 and app.en_cours == 0
     assert app.var_statut.get().startswith("Terminé")
 
@@ -418,6 +418,7 @@ def test_on_drop_decoupe_la_liste_tcl_et_rend_l_action(fabrique, tmp_path):
     data = "{%s} %s" % (a.as_posix(), b.as_posix())
     rendu = app._on_drop(SimpleNamespace(data=data, action="copy"))
     assert rendu == "copy"
+    assert _pomper(app, lambda: len(app.arbre.get_children()) == 2)     # traité APRÈS le retour du rappel
     assert _pomper(app, lambda: app.en_cours == 0)
     assert sorted(p.name for p in (tmp_path / "out").iterdir()) == ["[a]- a b.pdf", "[a]- b.pdf"]
 
@@ -825,6 +826,8 @@ def test_main_quand_le_verrou_est_tenu_mais_personne_ne_repond_continue(tmp_path
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     verrou = tray.prendre_verrou()
     monkeypatch.setattr(tray, "contacter_instance", lambda *a, **k: None)
+    monkeypatch.setattr(tray.time, "monotonic", iter(range(0, 10_000, 5)).__next__)   # le délai de 15 s passe vite
+    monkeypatch.setattr(tray.time, "sleep", lambda s: None)
     vues: list = []
     _faux_lancer(vues, monkeypatch)
     avant = list(tray.log.handlers)
@@ -875,3 +878,24 @@ def test_main_ancienne_version_a_port_fixe_est_signalee(tmp_path, monkeypatch):
     finally:
         _fermer_journal(avant)
     assert len(infos) == 1 and "ancienne version" in infos[0].lower()
+
+
+@GUI
+def test_nom_different_de_la_sortie_est_signale_dans_la_ligne(fabrique, tmp_path):
+    """Une sortie renommée « (2) » est annoncée en tête du détail, avant le message."""
+    app = fabrique(cfg={"sortie": str(tmp_path)})
+    iid = app.arbre.insert("", "end", values=("x.pdf", "⏳ En attente", ""), tags=("attente",))
+    app.en_cours = 1
+    app._fin(iid, core.Resultat(src=tmp_path / "x.pdf", dst=tmp_path / "[a]- x (2).pdf", statut="ok", message="msg"))
+    assert app.arbre.item(iid, "values")[2] == "→ [a]- x (2).pdf ; msg"
+
+
+@GUI
+def test_ligne_selectionnee_montre_le_texte_complet_et_la_source(fabrique, tmp_path):
+    app = fabrique(cfg={"sortie": str(tmp_path)})
+    iid = app.arbre.insert("", "end", values=("x.pdf", "✖ Erreur", "un très long message " * 10), tags=("erreur",))
+    app.sources[iid] = tmp_path / "OF-1" / "x.pdf"
+    app.arbre.selection_set(iid)
+    app.root.update()
+    texte = app.var_statut.get()
+    assert str(tmp_path / "OF-1" / "x.pdf") in texte and texte.count("un très long message") == 10

@@ -1,4 +1,6 @@
-pymupdf>=1.25,<2
-pillow>=10
-pystray>=0.19.5
-tkinterdnd2>=0.4.2
+# Versions épinglées : le moteur PDF (PyMuPDF/MuPDF) décide de ce qui est gravé dans vos fichiers.
+# On ne le change que volontairement, avec les tests au vert (voir README).
+pymupdf==1.28.2
+pillow==12.3.0
+pystray==0.19.5
+tkinterdnd2==0.6.3

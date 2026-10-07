@@ -1,0 +1,5 @@
+# Outils en plus pour les tests croisés (fusion + rendu par d'autres moteurs)
+-r requirements-dev.txt
+pypdf
+pypdfium2
+pyyaml

@@ -15,6 +15,12 @@ import time
 
 import PyInstaller.__main__
 
+for _flux in (sys.stdout, sys.stderr):      # journaux de CI lisibles (accents)
+    try:
+        _flux.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ICI = os.path.dirname(os.path.abspath(__file__))
 os.chdir(ICI)
 
@@ -63,6 +69,7 @@ if sys.platform == "win32":            # même auto-test que la CI : un exe cass
         code = -1
     if os.path.exists(rapport):
         print(open(rapport, encoding="utf-8").read())
+        os.remove(rapport)             # ne laisse pas un vieux « TOUT EST OK » traîner pour l'étape suivante
     if code != 0:
         print("\nÉCHEC : l'auto-test de l'exécutable a échoué (voir ci-dessus).")
         sys.exit(1)
