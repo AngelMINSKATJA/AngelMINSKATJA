@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+*.spec
+aplatir.ico
+selftest.txt
+_version.py
+.pytest_cache/

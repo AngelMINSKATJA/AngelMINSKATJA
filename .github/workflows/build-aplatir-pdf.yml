@@ -1,0 +1,131 @@
+name: Build AplatirPDF.exe
+
+on:
+  push:
+    branches: [main, "claude/pdf-signature-flattener-qwp90y"]
+    paths:
+      - "aplatir-pdf/**"
+      - ".github/workflows/build-aplatir-pdf.yml"
+    tags: ["aplatir-pdf-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PYTHONIOENCODING: utf-8     # accents lisibles dans les journaux (la console Windows est en cp1252)
+    defaults:
+      run:
+        working-directory: aplatir-pdf
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: aplatir-pdf/requirements*.txt
+
+      - name: Installer les dépendances
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Tests (l option -rs affiche pourquoi certains sont ignorés)
+        run: python -m pytest -q -rs
+
+      - name: Tests d'interface sous Windows (informatif tant qu'ils n'ont pas été vus verts)
+        id: gui
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          APLATIR_GUI_TESTS: "1"
+          APLATIR_SANS_DIALOGUE: "1"
+        run: python -m pytest -q -rs -p no:cacheprovider
+
+      - name: Signaler un échec des tests d'interface
+        if: steps.gui.outcome == 'failure'
+        shell: pwsh
+        run: |
+          Write-Host "::warning title=Tests d'interface Windows::au moins un test a échoué (voir l'étape précédente)"
+          "### Tests d'interface sous Windows : ÉCHEC (informatif, voir le journal)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Numéro de version (affiché dans la fenêtre)
+        shell: pwsh
+        run: |
+          "APLATIR_VERSION=${{ github.run_number }}-$($env:GITHUB_SHA.Substring(0, 7))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Fabriquer l'exécutable (build.py lance aussi l'auto-test)
+        env:
+          APLATIR_SANS_DIALOGUE: "1"
+        run: python build.py
+
+      - name: Auto-test de l'exe (sans interface)
+        shell: pwsh
+        env:
+          APLATIR_SANS_DIALOGUE: "1"
+        run: |
+          $rapport = Join-Path $PWD "selftest.txt"
+          Remove-Item $rapport -ErrorAction SilentlyContinue      # jamais de rapport périmé
+          $p = Start-Process -FilePath ".\dist\AplatirPDF.exe" -ArgumentList "--selftest", "`"$rapport`"" -PassThru
+          if (-not $p.WaitForExit(120000)) {
+            try { $p.Kill($true) } catch {}
+            throw "L'auto-test ne répond pas (boîte de dialogue ?)"
+          }
+          if (Test-Path $rapport) { Get-Content $rapport } else { Write-Host "Aucun rapport écrit" }
+          if ($p.ExitCode -ne 0) { throw "L'auto-test a échoué (code $($p.ExitCode))" }
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: AplatirPDF-windows
+          path: aplatir-pdf/dist/AplatirPDF.exe
+          if-no-files-found: error
+          retention-days: 90
+
+  tests-linux:
+    # Tests croisés que Windows ne fait pas : qpdf, pdfunite, poppler + toute l'interface sous Xvfb
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    env:
+      PYTHONIOENCODING: utf-8
+    defaults:
+      run:
+        working-directory: aplatir-pdf
+    steps:
+      - uses: actions/checkout@v6
+      - name: Outils système (qpdf, poppler, Tk, Xvfb)
+        timeout-minutes: 6       # un miroir apt muet ne doit pas annuler tout le run
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 install -y qpdf poppler-utils xvfb python3-tk python3-venv
+      - name: Environnement de test
+        timeout-minutes: 5
+        run: |
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/python -m pip install -r requirements-test.txt actionlint-py
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Tests (interface comprise, sous Xvfb)
+        timeout-minutes: 8
+        env:
+          APLATIR_GUI_TESTS: "1"
+          APLATIR_SANS_DIALOGUE: "1"
+        run: xvfb-run -a python -m pytest -q -rs -p no:cacheprovider
+
+  release:
+    # Uniquement quand on pousse une étiquette « aplatir-pdf-vX.Y » : publie l'exe en téléchargement direct
+    if: startsWith(github.ref, 'refs/tags/aplatir-pdf-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: AplatirPDF-windows
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: AplatirPDF.exe
+          fail_on_unmatched_files: true
