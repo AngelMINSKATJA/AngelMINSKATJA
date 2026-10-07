@@ -1,0 +1,18 @@
+<Project>
+
+  <!-- Réglages communs à tous les projets de BarcodeTray (src et tests). -->
+  <PropertyGroup>
+    <!-- Permet de restaurer/compiler les projets "net8.0-windows" hors Windows (vérification de types sous Linux).
+         Sans effet sous Windows. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <!-- Symboles de débogage DANS les .dll/.exe (jamais de fichier .pdb séparé) :
+         le dossier de publication ne contient ainsi que BarcodeTray.exe, et les traces d'erreur du
+         journal indiquent les numéros de ligne. -->
+    <DebugType>embedded</DebugType>
+
+    <!-- Compilation reproductible sur GitHub Actions (chemins normalisés). -->
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+</Project>

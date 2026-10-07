@@ -10,4 +10,9 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- lets the unit tests check the (internal) pattern table directly -->
+    <InternalsVisibleTo Include="Code128.Tests" />
+  </ItemGroup>
+
 </Project>

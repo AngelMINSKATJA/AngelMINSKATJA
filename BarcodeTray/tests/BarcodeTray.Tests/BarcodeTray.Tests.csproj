@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Tests de l'application Windows (System.Drawing, presse-papier...) : ils ne tournent que sous Windows
+       (job "windows-build" du workflow GitHub Actions). -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12.0</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>BarcodeTray.Tests</RootNamespace>
+    <AssemblyName>BarcodeTray.Tests</AssemblyName>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- ZXing.Net = décodeur indépendant servant d'oracle : on relit le code-barres généré (jamais livré) -->
+    <PackageReference Include="ZXing.Net" Version="0.16.9" />
+    <!-- [SkippableFact] : test ignoré (et non en échec) quand le presse-papier du poste n'est pas disponible -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.4.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Référencer un projet WinExe est possible avec .NET 8 -->
+    <ProjectReference Include="..\..\src\BarcodeTray\BarcodeTray.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

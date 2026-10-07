@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12.0</LangVersion>
+    <AssemblyName>BarcodeTray</AssemblyName>
+    <RootNamespace>BarcodeTray</RootNamespace>
+
+    <!-- Exécutable 64 bits, jamais d'élévation (voir app.manifest : asInvoker) -->
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+
+    <!-- Informations de version (onglet "Détails" des propriétés du fichier .exe) -->
+    <Version>1.0.0</Version>
+    <AssemblyTitle>Code-barres Code 128</AssemblyTitle>
+    <Product>BarcodeTray</Product>
+    <Description>Utilitaire de barre d'état : génère un code-barres Code 128, le copie dans le presse-papier ou l'imprime sur une imprimante d'étiquettes.</Description>
+    <Company>BarcodeTray</Company>
+    <Copyright>BarcodeTray</Copyright>
+
+    <!-- Un seul exécutable : pas de culture "satellite", pas de globalisation ICU (aucun fichier à côté de l'exe) -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+
+    <!-- Permet de restaurer/compiler (vérification de types) hors Windows ; sans effet sous Windows -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <!--
+    Publication : dotnet publish src/BarcodeTray -c Release -o publish
+    => un seul fichier BarcodeTray.exe, autonome (le runtime .NET est inclus, rien à installer),
+       compressé, pré-compilé (ReadyToRun) pour un démarrage rapide.
+    Pas de PublishTrimmed : Windows Forms ne le prend pas en charge.
+  -->
+  <PropertyGroup>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
+  <!--
+    Symboles de débogage intégrés au .exe (pas de .pdb à côté) : les traces d'erreur du journal
+    contiennent ainsi les numéros de ligne, ce qui aide au dépannage à distance.
+  -->
+  <PropertyGroup>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Icône chargée à l'exécution pour la zone de notification (NotifyIcon) -->
+    <EmbeddedResource Include="Assets\app.ico" LogicalName="app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Code128\Code128.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Permet aux tests (tests/BarcodeTray.Tests) d'atteindre les membres "internal" -->
+    <InternalsVisibleTo Include="BarcodeTray.Tests" />
+  </ItemGroup>
+
+</Project>
