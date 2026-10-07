@@ -536,8 +536,6 @@ def test_la_taille_de_sortie_reste_proche_de_celle_de_l_entree(tmp_path):
     assert res.dst.stat().st_size <= 1.5 * src.stat().st_size, (src.stat().st_size, res.dst.stat().st_size)
 
 
-@pytest.mark.xfail(strict=True, reason="R2-COR-2: message d'erreur technique (« FzErrorFormat : code=7: cycle in page "
-                   "tree ») montré tel quel à l'utilisateur au lieu d'un message clair")
 def test_arbre_de_pages_en_boucle_message_clair(tmp_path):
     d = pymupdf.open()
     for _ in range(3):
@@ -552,9 +550,6 @@ def test_arbre_de_pages_en_boucle_message_clair(tmp_path):
     assert "FzError" not in res.message and "code=" not in res.message, res.message
 
 
-@pytest.mark.xfail(strict=True, reason="R2-COR-3: /Resources de page invalide -> bake ne grave rien ; le fichier sort avec tampon "
-                   "et signature encore interactifs ET /AcroForm purgé (perdus à la fusion Acrobat) : simple « alerte », "
-                   "sans repli image automatique des pages restantes")
 def test_pages_restees_interactives_apres_gravure_sont_converties_en_image(tmp_path):
     d = pymupdf.open()
     p = d.new_page(width=400, height=400)

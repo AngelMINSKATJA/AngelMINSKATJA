@@ -268,7 +268,7 @@ def test_resume_a_verifier_correspond_a_une_ligne_a_verifier(tmp_path, fabrique)
     _deposer(app, _pdf(tmp_path / "s" / "Tampon masque.pdf", tampon=False, noview=True))
     _terminer(app, 1)
     statut = app.var_statut.get()
-    assert _lignes(app)[0][1].startswith("⚠ Aplati (image)"), _lignes(app)
+    assert _lignes(app)[0][1].startswith("✔ Aplati (image)"), _lignes(app)
     if "à vérifier" in statut:
         assert any("À vérifier" in v[1] for v in _lignes(app)), (statut, _lignes(app))
 
@@ -382,8 +382,6 @@ def test_readme_sans_reglisser():
     assert not re.search(r"\bReglisser\b|\breglisser\b", README)
 
 
-@pytest.mark.xfail(strict=True, reason="R2-UI-8: le message d'une page convertie en image répète la liste : "
-                                       "« page(s) 1 ; page(s) 1 convertie(s) en image par sécurité »")
 def test_message_image_sans_repetition_des_pages(tmp_path):
     import aplatir_core as core
     src = _pdf(tmp_path / "s" / "Tampon masque.pdf", tampon=False, noview=True)

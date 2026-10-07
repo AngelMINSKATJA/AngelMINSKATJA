@@ -37,6 +37,7 @@ import re
 import secrets
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import traceback
@@ -128,14 +129,15 @@ class Config:
 def charger_reserves() -> dict:
     """Noms de sortie déjà attribués (chemin de sortie -> source), mémorisés d'un lancement à
     l'autre : sans cela, après un redémarrage, un autre « Rapport.pdf » écraserait la sortie
-    du précédent. Les entrées dont le fichier n'existe plus sont oubliées."""
+    du précédent. Aucun test de disque ici (dossier réseau pas encore reconnecté au démarrage de
+    Windows, lecteur amovible...) : l'élagage se fait plus tard, à la lecture du dossier."""
     try:
         data = json.loads((dossier_config() / FICHIER_SORTIES).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     if not isinstance(data, dict):
         return {}
-    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str) and os.path.exists(k)}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
 
 
 def sauver_reserves(reserves: dict) -> None:
@@ -166,6 +168,16 @@ def configurer_journal() -> None:
 # --------------------------------------------------------------------------- #
 # Démarrage automatique avec Windows (clé « Run » de l'utilisateur, sans droits admin)
 # --------------------------------------------------------------------------- #
+def exe_dans_un_dossier_temporaire() -> bool:
+    """Vrai si l'exe tourne depuis un dossier temporaire, par exemple depuis l'aperçu d'un .zip
+    (``%TEMP%\\Temp1_xxx.zip\\``) : y inscrire le démarrage automatique le perdrait au nettoyage."""
+    if not getattr(sys, "frozen", False):
+        return False
+    exe = os.path.normcase(os.path.abspath(sys.executable))
+    tmp = os.path.normcase(os.path.abspath(tempfile.gettempdir()))
+    return exe.startswith(tmp + os.sep) or bool(re.search(r"[\\/]temp\d+_[^\\/]*\.zip[\\/]", exe, re.IGNORECASE))
+
+
 def commande_demarrage() -> str:
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}" --tray'
@@ -210,6 +222,9 @@ def regler_demarrage(actif: bool, nom: str = ID_APP, lever_veto: bool = True) ->
     lancement, passe ``lever_veto=False`` pour respecter un choix délibéré de l'utilisateur.
     """
     if sys.platform != "win32":
+        return False
+    if actif and exe_dans_un_dossier_temporaire():
+        log.warning("démarrage automatique non modifié : l'exe tourne depuis un dossier temporaire")
         return False
     import winreg
     try:
@@ -420,7 +435,7 @@ def activer_dpi_windows() -> None:
 LIBELLES = {   # statut -> (texte, étiquette de couleur)
     "ok": ("✔ Aplati", "ok"),
     "copie": ("✔ Copié", "ok"),
-    "securite": ("⚠ Aplati (image)", "alerte"),
+    "securite": ("✔ Aplati (image)", "image"),
     "alerte": ("⚠ À vérifier", "alerte"),
     "ignore": ("— Ignoré", "ignore"),
     "erreur": ("✖ Erreur", "erreur"),
@@ -434,7 +449,7 @@ class App:
     def __init__(self, cache: bool, fichiers: list, serveur: socket.socket | None, jeton: str | None = None):
         self.cfg = Config()
         premiere_fois = not self.cfg.charger()
-        if getattr(sys, "frozen", False):          # garde le chemin de l'exe à jour
+        if getattr(sys, "frozen", False) and not exe_dans_un_dossier_temporaire():   # chemin de l'exe à jour
             regler_demarrage(self.cfg["demarrage_auto"], lever_veto=False)
             if sys.platform == "win32":            # reflète un éventuel choix fait côté Windows
                 self.cfg["demarrage_auto"] = demarrage_actif()
@@ -533,6 +548,7 @@ class App:
             self.arbre.column(col, width=self._px(largeur), stretch=etire)
         self.arbre.tag_configure("ok", foreground="#1a7f37")
         self.arbre.tag_configure("alerte", foreground="#b35900")
+        self.arbre.tag_configure("image", foreground="#1f4e8c")
         self.arbre.tag_configure("erreur", foreground="#c62828")
         self.arbre.tag_configure("ignore", foreground="#6b7280")
         self.arbre.tag_configure("attente", foreground="#6b7280")
@@ -541,6 +557,8 @@ class App:
         asc.grid(row=0, column=1, sticky="ns")
         self.arbre.configure(yscrollcommand=asc.set)
         self.arbre.bind("<<TreeviewSelect>>", self._montrer_detail)
+        self.arbre.bind("<ButtonRelease-1>", self._montrer_detail)     # un 2e clic réaffiche le texte
+        self.arbre.bind("<Return>", self._montrer_detail)
 
         # boutons
         boutons = ttk.Frame(main)
@@ -568,8 +586,11 @@ class App:
                         command=self._maj_securite).pack(anchor="w")
 
         self.var_statut = tk.StringVar(value="Prêt.")
-        ttk.Label(main, textvariable=self.var_statut, anchor="w", foreground="#444").grid(
-            row=5, column=0, sticky="ew", pady=(self._px(8), 0))
+        fond = ttk.Style(r).lookup("TFrame", "background") or r.cget("bg")
+        lab = tk.Label(main, textvariable=self.var_statut, anchor="nw", justify="left", height=3,
+                       fg="#444", bg=fond)
+        lab.grid(row=5, column=0, sticky="ew", pady=(self._px(8), 0))
+        lab.bind("<Configure>", lambda e: lab.configure(wraplength=max(100, e.width - 8)))   # retour à la ligne
 
         # glisser-déposer : on enregistre la fenêtre et les zones principales
         for w in (self.root, self.zone, self.arbre):
@@ -586,7 +607,7 @@ class App:
             return
         fichier, statut, detail = self.arbre.item(sel[0], "values")[:3]
         source = self.sources.get(sel[0])
-        self.var_statut.set(f"{source or fichier}  —  {statut} : {detail}")
+        self.var_statut.set(f"{statut} : {detail}\n{source or fichier}")      # l'important d'abord, le chemin ensuite
 
     def _maj_texte_zone(self) -> None:
         if self.cfg["sortie"]:
@@ -667,6 +688,12 @@ class App:
         self.cfg["securite"] = bool(self.var_securite.get())
 
     def definir_demarrage(self, actif: bool) -> None:
+        if actif and exe_dans_un_dossier_temporaire():
+            messagebox.showinfo(NOM_APP, "L'exe tourne depuis un dossier temporaire (aperçu d'un .zip ?).\n\n"
+                                "Copiez d'abord AplatirPDF.exe dans un dossier de votre choix, lancez-le "
+                                "de là, puis cochez cette case.")
+            self.var_demarrage.set(bool(self.cfg["demarrage_auto"]))
+            return
         ok = regler_demarrage(actif)
         if not ok and sys.platform == "win32":
             messagebox.showwarning(NOM_APP, "Impossible de modifier le démarrage automatique.")
@@ -723,7 +750,7 @@ class App:
     # ----- boucle d'événements (thread principal) ------------------------- #
     def _pomper(self) -> None:
         try:
-            while True:
+            while not self._ferme:
                 self._evenement(self.evenements.get_nowait())
         except queue.Empty:
             pass
@@ -731,7 +758,8 @@ class App:
             log.error("erreur dans la boucle d'événements", exc_info=True)
         finally:
             try:
-                self.root.after(100, self._pomper)
+                if not self._ferme:
+                    self.root.after(100, self._pomper)
             except tk.TclError:
                 pass
 
@@ -813,6 +841,7 @@ class App:
         pdfs, ignores = core.collecter_pdf(chemins)
         if self.en_cours == 0:
             self.stats = self._stats_vides()
+            self._elaguer_reserves(sortie)
         for p, raison in ignores:
             iid = self.arbre.insert("", "end", values=(p.name, LIBELLES["ignore"][0], raison), tags=("ignore",))
             self.arbre.see(iid)
@@ -832,6 +861,17 @@ class App:
             self.jobs.put((iid, p, sortie, bool(self.cfg["securite"]), dst))
         sauver_reserves(self.reserves)
         self.var_statut.set(f"{self.en_cours} fichier(s) en cours de traitement…")
+
+    def _elaguer_reserves(self, sortie: Path) -> None:
+        """Oublie les noms réservés dont le fichier a disparu du dossier de sortie (une seule lecture
+        du dossier, rien en attente). Dossier injoignable : on ne touche à rien."""
+        try:
+            presents = {os.path.normcase(str(sortie / n)) for n in os.listdir(sortie)}
+        except OSError:
+            return
+        racine = os.path.normcase(str(sortie)) + os.sep
+        for k in [k for k in self.reserves if k.startswith(racine) and k not in presents]:
+            del self.reserves[k]
 
     def _boucle_travail(self) -> None:
         while True:

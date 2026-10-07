@@ -379,7 +379,7 @@ def test_exception_dans_le_worker_est_une_ligne_erreur_et_le_worker_continue(fab
 @pytest.mark.parametrize("statut, dst, texte, tag, cle", [
     ("ok", True, "✔ Aplati", "ok", "ok"),
     ("copie", True, "✔ Copié", "ok", "copie"),
-    ("securite", True, "⚠ Aplati (image)", "alerte", "image"),
+    ("securite", True, "✔ Aplati (image)", "image", "image"),
     ("alerte", True, "⚠ À vérifier", "alerte", "alerte"),
     ("ignore", False, "— Ignoré", "ignore", "ignore"),
     ("erreur", False, "✖ Erreur", "erreur", "erreur"),

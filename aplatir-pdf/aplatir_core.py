@@ -91,8 +91,9 @@ def chemin_sortie_unique(src: Path, dossier_sortie: Path, reserves: dict) -> Pat
 
     Deux sources de même nom (``OF-1\\Rapport.pdf`` et ``OF-2\\Rapport.pdf``) ne doivent pas
     s'écraser : la 2e devient ``[a]- Rapport (2).pdf``. ``reserves`` est un dict partagé
-    (chemin de sortie -> source) que l'appelant garde le temps de la session ; redéposer
-    la MÊME source retrouve le même nom (le fichier est alors simplement remplacé).
+    (chemin de sortie -> source) que l'appelant garde ; redéposer la MÊME source retrouve le
+    même nom (le fichier est alors simplement remplacé). Un fichier déjà présent dans le dossier
+    de sortie dont on ne connaît pas l'origine compte comme une AUTRE source : il n'est jamais écrasé.
     """
     cle_src = _cle(Path(src))
     base = chemin_sortie(src, dossier_sortie)
@@ -100,7 +101,7 @@ def chemin_sortie_unique(src: Path, dossier_sortie: Path, reserves: dict) -> Pat
     while True:
         k = os.path.normcase(str(cand))
         proprietaire = reserves.get(k)
-        if proprietaire is None or proprietaire == cle_src:
+        if proprietaire == cle_src or (proprietaire is None and not cand.exists()):
             reserves[k] = cle_src
             return cand
         n += 1
@@ -174,10 +175,20 @@ def collecter_pdf(chemins: Iterable):
 # --------------------------------------------------------------------------- #
 # Analyse
 # --------------------------------------------------------------------------- #
-def analyser(doc) -> Analyse:
-    """Pages portant une signature, un champ de formulaire ou une annotation visible."""
+def _annotations_directes(doc, page) -> list:
+    """Types des annotations écrites EN LIGNE dans le tableau /Annots (``/Annots [ << ... >> ]``) :
+    ``page.annots()`` ne les énumère pas, mais MuPDF les affiche et ``bake`` les grave."""
+    brut = doc.xref_get_key(page.xref, "Annots")
+    if brut[0] != "array" or "<<" not in brut[1]:
+        return []
+    return [t for t in re.findall(r"/Subtype\s*/(\w+)", brut[1]) if t not in TYPES_NEUTRES]
+
+
+def analyser(doc, pages=None) -> Analyse:
+    """Pages portant une signature, un champ de formulaire ou une annotation visible.
+    ``pages`` (numéros 1-based) limite l'analyse à ces pages."""
     res = Analyse()
-    for page in doc:
+    for page in (doc if pages is None else (doc[n - 1] for n in pages)):
         n = page.number + 1
         elems: list[str] = []
         try:
@@ -196,12 +207,38 @@ def analyser(doc) -> Analyse:
                 t = a.type[1]
                 if t not in TYPES_NEUTRES:
                     elems.append(f"annotation {t}")
+            for t in _annotations_directes(doc, page):
+                elems.append(f"annotation {t}")
         except Exception:
             # page illisible : par prudence on la considère comme « à graver »
             elems.append("éléments illisibles")
         if elems:
             res.pages[n] = elems
     return res
+
+
+def _reparation_due_a_la_queue(src: Path, nb_pages: int) -> bool:
+    """Vrai si MuPDF n'a « réparé » qu'à cause d'octets APRÈS le dernier %%EOF (zéros de rembourrage,
+    pied de page : Firefox/cairo via Selenium...) : tronqué à ce marqueur, le fichier s'ouvre sans
+    réparation avec le même nombre de pages. Une mise à jour incrémentale TRONQUÉE (signature
+    perdue) laisse des objets après le %%EOF précédent : elle reste une alerte."""
+    try:
+        data = Path(src).read_bytes()
+        k = data.rfind(b"%%EOF")
+        if k < 0 or k + 5 >= len(data):
+            return False
+        if re.search(rb"(?<![A-Za-z])(obj|endobj|stream|endstream|xref|trailer|startxref)(?![A-Za-z])",
+                     data[k + 5:]):
+            return False
+        t = pymupdf.open(stream=data[:k + 5], filetype="pdf")
+        try:
+            for page in t:
+                pass                        # le parcours des pages peut déclencher la réparation
+            return t.page_count == nb_pages and not t.is_repaired
+        finally:
+            t.close()
+    except Exception:
+        return False
 
 
 def _a_des_restrictions(doc) -> bool:
@@ -211,6 +248,23 @@ def _a_des_restrictions(doc) -> bool:
         return doc.xref_get_key(-1, "Encrypt")[0] != "null"
     except Exception:
         return False
+
+
+def _xfa_dynamique(doc, analyse) -> bool:
+    """XFA dynamique : /NeedsRendering true (les pages ne sont qu'un bandeau « Please wait… », même
+    si elles portent un champ, par exemple la signature) ou, sans ce drapeau, aucun élément et un
+    bandeau reconnaissable. Un /XFA résiduel sur un document ordinaire n'est PAS refusé."""
+    if not _xfa_present(doc):
+        return False
+    try:
+        if doc.xref_get_key(doc.pdf_catalog(), "NeedsRendering")[1] == "true":
+            return True
+        if not analyse.pages:
+            texte = (doc[0].get_text() or "").lower()
+            return any(m in texte for m in ("please wait", "veuillez patienter", "adobe reader"))
+    except Exception:
+        pass
+    return False
 
 
 def _xfa_present(doc) -> bool:
@@ -234,13 +288,28 @@ def _normaliser_pour_rendu(doc) -> None:
     for page in doc:
         try:
             widgets = list(page.widgets() or [])
+            xrefs = {w.xref for w in widgets} | {a.xref for a in (page.annots() or [])}
         except Exception:
             continue
+        for x in xrefs:
+            try:
+                _lever_invisible(doc, x)
+            except Exception:
+                pass
         for w in widgets:
             try:
                 _normaliser_champ(doc, w)
             except Exception:
                 pass
+
+
+def _lever_invisible(doc, xref: int) -> None:
+    """Bit 1 de /F (« Invisible ») : par la norme (ISO 32000-1, 12.5.3) il ne vaut que pour les types
+    d'annotation NON standard, et Poppler / pdfium affichent ces objets ; MuPDF les cache et ``bake``
+    ne les grave pas -> une signature, un tampon ou un surlignage disparaîtraient sans alerte."""
+    f = doc.xref_get_key(xref, "F")
+    if f[0] == "int" and int(f[1]) & 1:
+        doc.xref_set_key(xref, "F", str(int(f[1]) & ~1))
 
 
 def _normaliser_champ(doc, w) -> None:
@@ -340,9 +409,25 @@ def _pages_alterees(orig, doc, numeros, zones_vides=None) -> list:
     return _comparer_pages(orig, doc, numeros, zones_vides)
 
 
-def _comparer_pages(orig, doc, numeros, zones_vides=None) -> list:
+def _masquage_voulu(orig, n: int) -> bool:
+    """Vrai si une annotation / un champ de la page porte une demande explicite de masquage
+    (bits Hidden 2 / NoView 32 de /F, ou /OC). En cas de doute : vrai (comportement prudent)."""
+    try:
+        page = orig[n - 1]
+        for x in {a.xref for a in (page.annots() or [])} | {w.xref for w in (page.widgets() or [])}:
+            f = orig.xref_get_key(x, "F")
+            fl = int(f[1]) if f[0] == "int" else 0
+            if fl & (2 | 32) or orig.xref_get_key(x, "OC")[0] != "null":
+                return True
+    except Exception:
+        return True
+    return False
+
+
+def _comparer_pages(orig, doc, numeros, zones_vides=None, ajouts_seuls=None) -> list:
     """Pages (1-based) dont l'aspect dans ``doc`` diffère de celui de ``orig`` : marque perdue
-    OU marque ajoutée."""
+    OU marque ajoutée. ``ajouts_seuls`` (liste, facultatif) reçoit les pages où il n'y a QUE des
+    ajouts (rien de perdu)."""
     zones_vides = zones_vides or {}
     alterees = []
     for n in numeros:
@@ -353,8 +438,12 @@ def _comparer_pages(orig, doc, numeros, zones_vides=None) -> list:
             if n in zones_vides:
                 _masquer_zones(avant, fond, orig[n - 1], zones_vides[n])
                 _masquer_zones(apres, fond, orig[n - 1], zones_vides[n])
-            if _marque_perdue(avant, apres, fond) or _marque_ajoutee(avant, apres, fond):
+            perdue = _marque_perdue(avant, apres, fond)
+            ajoutee = _marque_ajoutee(avant, apres, fond)
+            if perdue or ajoutee:
                 alterees.append(n)
+                if ajoutee and not perdue and ajouts_seuls is not None:
+                    ajouts_seuls.append(n)
         except Exception:
             alterees.append(n)   # impossible de contrôler : par prudence
         finally:
@@ -449,7 +538,9 @@ def _message_erreur(e: Exception) -> str:
         return "disque plein : impossible d'écrire le fichier de sortie"
     if isinstance(e, OSError):
         return f"erreur disque : {e.strerror or e}"
-    texte = re.sub(r"^(Fz|mupdf)\w*:?\s*(code=\d+:\s*)?", "", texte)
+    if nom.startswith(("Fz", "Mupdf")) or isinstance(e, (IndexError, RuntimeError)):
+        detail = re.sub(r"^(code=\d+:\s*)", "", texte)
+        return f"PDF illisible ou corrompu (détail technique : {detail})"
     return f"{nom} : {texte}"
 
 
@@ -557,20 +648,22 @@ def _aplatir(src: Path, dossier: Path, securite: bool, dpi_raster: int, res: Res
     doc = _ouvrir(src)
     orig = None
     try:
-        reparee = bool(getattr(doc, "is_repaired", False))
         analyse = analyser(doc)
+        # lu APRÈS le parcours des pages : MuPDF peut ne réparer qu'au chargement d'une page
+        reparee = bool(getattr(doc, "is_repaired", False)) \
+            and not _reparation_due_a_la_queue(src, doc.page_count)
         res.signatures = analyse.signatures
         res.pages_elements = sorted(analyse.pages)
         nb_pages = doc.page_count
         suffixe_reparee = (" ; fichier source endommagé (réparé automatiquement) : signature(s) ou "
                            "page(s) peut-être manquantes dès l'origine, à vérifier")
 
+        if _xfa_dynamique(doc, analyse):
+            raise ErreurPDF(
+                "formulaire dynamique XFA : son contenu n'est pas dans les pages (il n'y a qu'une "
+                "page « Please wait… »). Ouvrez-le dans Adobe Reader, imprimez-le en PDF "
+                "(Microsoft Print to PDF), puis déposez ce PDF")
         if not analyse.pages:
-            if _xfa_present(doc):
-                raise ErreurPDF(
-                    "formulaire dynamique XFA : son contenu n'est pas dans les pages (il n'y a qu'une "
-                    "page « Please wait… »). Ouvrez-le dans Adobe Reader, imprimez-le en PDF "
-                    "(Microsoft Print to PDF), puis déposez ce PDF")
             if _a_des_restrictions(doc):    # on écrit une copie sans restrictions d'assemblage
                 _enregistrer(doc, dst)
             else:
@@ -588,6 +681,7 @@ def _aplatir(src: Path, dossier: Path, securite: bool, dpi_raster: int, res: Res
         _normaliser_pour_rendu(orig)
         pages_image: list[int] = []
         alerte_visuelle = ""
+        douteuses: list[int] = []
         try:
             doc.bake(annots=True, widgets=True)
         except Exception as e:
@@ -599,11 +693,26 @@ def _aplatir(src: Path, dossier: Path, securite: bool, dpi_raster: int, res: Res
             pages_image = sorted(analyse.pages)
         else:
             alterees = _pages_alterees(orig, doc, sorted(analyse.pages), analyse.zones_vides)
+            ajouts: list[int] = []
+            if alterees:
+                _comparer_pages(orig, doc, alterees, analyse.zones_vides, ajouts)
+            # Page où l'aplatissement ne fait qu'AJOUTER une marque que MuPDF n'affichait pas, sans
+            # demande de masquage dans le fichier (champ sans /T ou /FT, par exemple) : MuPDF ne sait
+            # pas l'afficher mais Acrobat si. Remplacer la page par SON rendu perdrait la marque :
+            # on garde la page gravée et on signale.
+            douteuses = [n for n in ajouts if not _masquage_voulu(orig, n)]
+            if douteuses:
+                alerte_visuelle = ("page(s) " + ", ".join(map(str, douteuses)) + " : un élément visible dans "
+                                   "le fichier n'est pas affiché par le moteur de contrôle : à vérifier")
+                alterees = [n for n in alterees if n not in douteuses]
+            # pages que ``bake`` n'a pas pu traiter (ex. /Resources invalide) : encore interactives
+            restes_mem = sorted(analyser(doc, sorted(analyse.pages)).pages)
+            alterees = sorted(set(alterees) | set(restes_mem))
             if alterees and securite:
                 pages_image = alterees
             elif alterees:
-                alerte_visuelle = ("rendu différent après aplatissement, page(s) "
-                                   + ", ".join(map(str, alterees)) + " : à vérifier")
+                alerte_visuelle = (alerte_visuelle + " ; " if alerte_visuelle else "") \
+                    + "rendu différent après aplatissement, page(s) " + ", ".join(map(str, alterees)) + " : à vérifier"
 
         if pages_image:
             _convertir_en_images(doc, orig, pages_image, dpi_raster)
@@ -615,8 +724,8 @@ def _aplatir(src: Path, dossier: Path, securite: bool, dpi_raster: int, res: Res
         chk = pymupdf.open(str(dst))
         try:
             pages_ok = chk.page_count == nb_pages
-            restes = analyser(chk).pages if pages_ok else {}
-            differentes = _controler_ecrit(orig, chk, analyse, pages_image) if pages_ok else []
+            restes = analyser(chk, sorted(analyse.pages)).pages if pages_ok else {}
+            differentes = _controler_ecrit(orig, chk, analyse, pages_image + douteuses) if pages_ok else []
         finally:
             chk.close()
     finally:
@@ -651,8 +760,10 @@ def _aplatir(src: Path, dossier: Path, securite: bool, dpi_raster: int, res: Res
         res.message = base + " ; " + " ; ".join(problemes)
     elif res.pages_image:
         res.statut = "securite"
-        res.message = (f"{base} ; page(s) {_liste_pages(res.pages_image)} "
-                       "convertie(s) en image par sécurité")
+        if res.pages_image == res.pages_elements:
+            res.message = f"{base} ; convertie(s) en image par sécurité"
+        else:
+            res.message = f"{base} ; dont page(s) {_liste_pages(res.pages_image)} converties en image par sécurité"
     else:
         res.statut = "ok"
         res.message = base

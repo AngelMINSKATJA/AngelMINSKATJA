@@ -90,11 +90,6 @@ def test_reparation_detectee_pendant_le_parcours_des_pages_est_signalee(tmp_path
     assert res.statut == "alerte", f"{res.statut} : {res.message}"
 
 
-test_reparation_detectee_pendant_le_parcours_des_pages_est_signalee = pytest.mark.xfail(
-    strict=True,
-    reason="R2-FA-1: `reparee` est lu juste après l'ouverture, avant analyser()/le parcours des "
-           "pages : une réparation déclenchée au chargement d'une page passe en 'ok' sans alerte",
-)(test_reparation_detectee_pendant_le_parcours_des_pages_est_signalee)
 
 
 # --------------------------------------------------------------------------- #
@@ -122,12 +117,6 @@ def test_donnees_apres_eof_ne_sont_pas_un_fichier_endommage(tmp_path, queue, ann
     assert res.statut in ("ok", "copie"), f"{res.statut} : {res.message}"
 
 
-test_donnees_apres_eof_ne_sont_pas_un_fichier_endommage = pytest.mark.xfail(
-    strict=True,
-    reason="R2-FA-2: tout `is_repaired` est présenté comme « fichier endommagé, pages peut-être "
-           "manquantes », y compris quand le fichier tronqué après le dernier %%EOF s'ouvre "
-           "sans réparation (rembourrage de zéros, pied de page)",
-)(test_donnees_apres_eof_ne_sont_pas_un_fichier_endommage)
 
 
 def test_fichier_tronque_reste_signale(tmp_path):
@@ -191,17 +180,11 @@ def _pdf_xfa_dynamique_avec_champ(tmp_path):
     return chemin
 
 
-@pytest.mark.xfail(strict=True, reason="R2-FA-3: le test XFA n'est fait que si aucune page n'a d'élément : "
-                   "un XFA dynamique dont la page « Please wait… » porte un champ sort en 'ok' avec "
-                   "uniquement le bandeau (le vrai contenu du formulaire est absent)")
 def test_xfa_dynamique_dont_le_bandeau_porte_un_champ_est_refuse(tmp_path):
     res = _aplatir(_pdf_xfa_dynamique_avec_champ(tmp_path), tmp_path)
     assert res.statut == "erreur" and "XFA" in res.message, f"{res.statut} : {res.message}"
 
 
-@pytest.mark.xfail(strict=True, reason="R2-FA-3: un document ordinaire (pages pleines de texte, "
-                   "pas de /NeedsRendering) portant seulement un /XFA résiduel dans /AcroForm est "
-                   "refusé en 'erreur' au lieu d'être copié")
 def test_xfa_residuel_sur_document_ordinaire_n_est_pas_une_erreur(tmp_path):
     d = _doc(3)
     _xfa_dans_catalogue(d, needs_rendering=False)

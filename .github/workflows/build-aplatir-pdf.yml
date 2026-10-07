@@ -16,6 +16,8 @@ jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      PYTHONIOENCODING: utf-8     # accents lisibles dans les journaux (la console Windows est en cp1252)
     defaults:
       run:
         working-directory: aplatir-pdf
@@ -35,12 +37,20 @@ jobs:
         run: python -m pytest -q -rs
 
       - name: Tests d'interface sous Windows (informatif tant qu'ils n'ont pas été vus verts)
+        id: gui
         continue-on-error: true
         timeout-minutes: 10
         env:
           APLATIR_GUI_TESTS: "1"
           APLATIR_SANS_DIALOGUE: "1"
-        run: python -m pytest -q -rs tests/test_gui_app.py tests/test_windows_gui.py tests/test_requirements_gui.py tests/test_gui_process.py
+        run: python -m pytest -q -rs -p no:cacheprovider
+
+      - name: Signaler un échec des tests d'interface
+        if: steps.gui.outcome == 'failure'
+        shell: pwsh
+        run: |
+          Write-Host "::warning title=Tests d'interface Windows::au moins un test a échoué (voir l'étape précédente)"
+          "### Tests d'interface sous Windows : ÉCHEC (informatif, voir le journal)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Numéro de version (affiché dans la fenêtre)
         shell: pwsh
@@ -77,23 +87,32 @@ jobs:
   tests-linux:
     # Tests croisés que Windows ne fait pas : qpdf, pdfunite, poppler + toute l'interface sous Xvfb
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     continue-on-error: true
+    env:
+      PYTHONIOENCODING: utf-8
     defaults:
       run:
         working-directory: aplatir-pdf
     steps:
       - uses: actions/checkout@v6
-      - run: sudo apt-get update && sudo apt-get install -y qpdf poppler-utils xvfb python3-tk python3-venv
+      - name: Outils système (qpdf, poppler, Tk, Xvfb)
+        timeout-minutes: 6       # un miroir apt muet ne doit pas annuler tout le run
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 install -y qpdf poppler-utils xvfb python3-tk python3-venv
       - name: Environnement de test
+        timeout-minutes: 5
         run: |
           python3 -m venv --system-site-packages .venv
-          .venv/bin/python -m pip install -r requirements-test.txt
+          .venv/bin/python -m pip install -r requirements-test.txt actionlint-py
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Tests (interface comprise, sous Xvfb)
+        timeout-minutes: 8
         env:
           APLATIR_GUI_TESTS: "1"
           APLATIR_SANS_DIALOGUE: "1"
-        run: xvfb-run -a .venv/bin/python -m pytest -q -rs
+        run: xvfb-run -a python -m pytest -q -rs -p no:cacheprovider
 
   release:
     # Uniquement quand on pousse une étiquette « aplatir-pdf-vX.Y » : publie l'exe en téléchargement direct

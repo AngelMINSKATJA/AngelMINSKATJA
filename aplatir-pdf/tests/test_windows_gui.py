@@ -91,6 +91,8 @@ def test_lignes_du_tableau_assez_hautes_pour_la_police(faire_app, monkeypatch, e
     monkeypatch.setattr(tray.TkinterDnD, "Tk", TkMisAEchelle)
     app = faire_app()
     app.root.update()
+    if app.root.winfo_screenheight() < 800 and echelle >= 1.75:
+        pytest.skip("écran trop petit pour cette échelle (la fenêtre est bornée à l'écran)")
     police = tkfont.nametofont("TkDefaultFont", app.root)
     iid = app.arbre.insert("", "end", values=("Rapport é.pdf", "✔ Aplati", "1 signature(s)"))
     app.root.update()

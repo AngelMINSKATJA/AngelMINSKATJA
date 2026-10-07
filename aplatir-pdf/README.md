@@ -14,7 +14,7 @@ Vos fichiers d'origine ne sont **jamais modifiés**. Aucun droit administrateur 
 Un runner Windows de GitHub fabrique l'exe et le teste automatiquement :
 
 1. Sur GitHub, ouvrez le dépôt → onglet **Actions** → workflow **Build AplatirPDF.exe**.
-2. Cliquez sur la dernière exécution verte (✔) → section **Artifacts** en bas → **AplatirPDF-windows**.
+2. Cliquez sur la dernière exécution dont l'étape **build** est verte (✔) → section **Artifacts** en bas → **AplatirPDF-windows**.
 3. Décompressez le `.zip` téléchargé : il contient `AplatirPDF.exe`. Copiez-le où vous voulez
    (par exemple `C:\Outils\AplatirPDF\`) puis lancez-le **depuis cet emplacement** (pas depuis le `.zip`).
    Le démarrage automatique mémorise cet emplacement : s'il change, relancez l'exe une fois à la main.
@@ -65,7 +65,7 @@ l'Explorateur pendant que vous cherchez vos fichiers ; décochez-la si elle vous
 La case **« Sécurité : convertir en image une page si l'aplatissement altère son aspect »** (cochée par
 défaut) est la protection principale : si l'aplatissement normal change l'aspect d'une page (signature
 perdue, tampon caché qui devient visible…), la page est remplacée par une image fidèle — ligne
-⚠ *Aplati (image)*. Décochée, la page reste telle quelle et la ligne devient ⚠ *À vérifier* :
+✔ *Aplati (image)* (en bleu). Décochée, la page reste telle quelle et la ligne devient ⚠ *À vérifier* :
 à contrôler à la main.
 
 Lancer l'exe une 2ᵉ fois ne démarre pas une 2ᵉ copie : cela ramène simplement la fenêtre.
@@ -77,7 +77,7 @@ Glisser des PDF **directement sur l'icône du fichier `.exe`** les traite aussi.
 |---|---|
 | ✔ **Aplati** | Signatures, tampons, annotations, champs gravés ; la ligne indique les **pages** concernées. |
 | ✔ **Copié** | Rien à aplatir dans ce PDF : il est simplement copié sous le nouveau nom. |
-| ⚠ **Aplati (image)** | Normal et sans gravité : pour certaines pages, l'aplatissement normal changeait l'aspect : elles ont été **converties en image** (200 dpi, texte non sélectionnable) pour être fidèles. |
+| ✔ **Aplati (image)** (bleu) | Normal et sans gravité : pour certaines pages, l'aplatissement normal changeait l'aspect : elles ont été **converties en image** (200 dpi, texte non sélectionnable) pour être fidèles. |
 | ⚠ **À vérifier** | Ouvrez le PDF produit et contrôlez les pages citées (aspect différent, fichier source réparé automatiquement car abîmé, éléments restants…). |
 | ✖ **Erreur** | Le fichier n'a pas été produit ; le message dit pourquoi (mot de passe, fichier abîmé, fichier de sortie ouvert dans Acrobat, formulaire XFA…). |
 | — **Ignoré** | Ce n'est pas un PDF, ou son nom commence déjà par `[a]- `. |

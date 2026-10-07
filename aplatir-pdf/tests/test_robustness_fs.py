@@ -144,7 +144,8 @@ def test_dossier_de_sortie_en_lecture_seule(tmp_path):
     try:
         for cible in (sortie, sortie / "sous"):
             res = core.aplatir_fichier(src, cible)
-            assert res.statut == "erreur" and "accès refusé" in res.message
+            assert res.statut == "erreur" and ("accès refusé" in res.message
+                                               or "dossier de sortie inaccessible" in res.message), res.message
         assert list(sortie.iterdir()) == []
     finally:
         sortie.chmod(0o755)
@@ -281,8 +282,6 @@ def test_message_disque_plein_chemin_bake(tmp_path, monkeypatch):
     assert "FzError" not in res.message and "code=" not in res.message, res.message
 
 
-@pytest.mark.xfail(strict=True, reason="ROB-8: source illisible (droits, verrou exclusif Windows) -> « PDF illisible ou "
-                                       "corrompu » au lieu d'un message d'accès refusé")
 @pytest.mark.skipif(os.name != "posix" or (hasattr(os, "geteuid") and os.geteuid() == 0),
                     reason="droits POSIX non contraignants (Windows ou root)")
 def test_message_source_illisible(tmp_path):
