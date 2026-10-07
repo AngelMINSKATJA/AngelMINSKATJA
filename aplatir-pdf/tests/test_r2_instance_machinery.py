@@ -225,9 +225,9 @@ def test_ouvrir_serveur_survit_a_un_refus_passager_de_os_replace(profil, monkeyp
 # R2-INST-4 : une ancienne exe ÉCRASE une exe plus récente
 # --------------------------------------------------------------------------- #
 def test_une_exe_plus_ancienne_ne_remplace_pas_l_instance_plus_recente(profil, monkeypatch):
-    monkeypatch.setattr(tray, "VERSION", "3-ancienne")
+    monkeypatch.setattr(tray, "VERSION", "9-recente")           # l'instance qui tourne est la récente
     verrou = tray.prendre_verrou()
-    serveur, jeton = tray.ouvrir_serveur()
+    serveur, jeton = tray.ouvrir_serveur()                      # publie sa version dans instance.json
     recus: list = []
 
     def poster(msg):
@@ -237,14 +237,18 @@ def test_une_exe_plus_ancienne_ne_remplace_pas_l_instance_plus_recente(profil, m
 
     threading.Thread(target=tray.servir_instance, args=(serveur, jeton, poster, lambda: False, "9-recente"),
                      daemon=True).start()
+    monkeypatch.setattr(tray, "VERSION", "3-ancienne")          # l'exe lancée ensuite est plus ancienne
     _attente_courte(monkeypatch, 1.0)
     creees = _faux_app(monkeypatch)
+    infos: list = []
+    monkeypatch.setattr(tray, "message_info", infos.append)
     try:
         tray.main([])
     finally:
         serveur.close()
         if not verrou.closed:
             verrou.close()
+    assert len(infos) == 1 and "plus récente" in infos[0]
     assert {"cmd": "quit"} not in recus, "l'instance récente a reçu l'ordre de se fermer par une exe plus ancienne"
     assert creees == []
 
