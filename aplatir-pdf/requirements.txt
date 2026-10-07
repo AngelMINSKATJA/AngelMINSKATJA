@@ -1,0 +1,4 @@
+pymupdf>=1.25,<2
+pillow>=10
+pystray>=0.19.5
+tkinterdnd2>=0.4.2
