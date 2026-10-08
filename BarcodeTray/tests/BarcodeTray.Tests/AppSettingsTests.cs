@@ -29,6 +29,7 @@ public class AppSettingsTests
         Assert.Equal(15, s.MinLabelLengthMm);
         Assert.Null(s.PaperName);
         Assert.True(s.CheckPrinterStatus);
+        Assert.True(s.CheckPaper);
         Assert.False(s.LoadFailed);
     }
 
@@ -72,6 +73,7 @@ public class AppSettingsTests
             MinLabelLengthMm = 20,
             PaperName = "62mm x 29mm",
             CheckPrinterStatus = false,
+            CheckPaper = false,
         };
 
         original.Save();
@@ -96,7 +98,7 @@ public class AppSettingsTests
         foreach (string expected in new[]
                  {
                      "PrinterName", "FirstRunDone", "Dpi", "ModulePx", "MaxWidthPx", "BarHeightPx",
-                     "FontName", "FontSizePt", "LabelWidthMm", "MinLabelLengthMm", "PaperName", "CheckPrinterStatus",
+                     "FontName", "FontSizePt", "LabelWidthMm", "MinLabelLengthMm", "PaperName", "CheckPrinterStatus", "CheckPaper",
                  })
         {
             Assert.Contains(expected, keys);
@@ -474,5 +476,6 @@ public class AppSettingsTests
         Assert.Equal(expected.MinLabelLengthMm, actual.MinLabelLengthMm);
         Assert.Equal(expected.PaperName, actual.PaperName);
         Assert.Equal(expected.CheckPrinterStatus, actual.CheckPrinterStatus);
+        Assert.Equal(expected.CheckPaper, actual.CheckPaper);
     }
 }

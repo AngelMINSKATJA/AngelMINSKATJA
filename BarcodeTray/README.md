@@ -83,7 +83,7 @@ Les artefacts sont conservés 90 jours. Pour en obtenir un nouveau : onglet **Ac
 - **Qualité : priorité à la qualité d'impression** ; si le pilote propose un mode de demi-teinte, choisir **Binaire** (noir et blanc pur, pas de tramage) : c'est ce qui donne les barres les plus nettes.
 - Ne pas modifier l'orientation (portrait) ni ajouter de marges : le programme les gère.
 
-Le programme crée lui-même un papier « 62 mm de large » dont la longueur suit l'image, en s'appuyant sur le format `62mm` du pilote.
+Le programme demande au pilote **son propre format `62mm`** (avec son identifiant interne) en précisant la longueur de l'image. Les pilotes Brother ignorent un papier « personnalisé » envoyé sans cet identifiant et reprennent alors leur format par défaut (par exemple 29 mm x 90 mm), ce qui ne correspond pas au rouleau de 62 mm : l'imprimante refuse alors d'imprimer. **Avant d'imprimer, le programme vérifie donc, sans rien imprimer, que le pilote a bien pris le format en compte** (zone imprimable de la largeur du rouleau) ; il essaie plusieurs façons de le demander et retient celle que le pilote accepte. Si aucune n'est acceptée, il affiche un message rouge et n'envoie rien. La longueur de l'étiquette inclut les marges non imprimables du pilote (environ 3 mm en haut et en bas) : pour les réduire, ouvrez les préférences d'impression de la QL-800 dans Windows et changez la **marge** (Margin).
 
 **Avant chaque impression, le programme vérifie l'état de l'imprimante dans Windows** : imprimante éteinte ou débranchée, option « Utiliser l'imprimante hors connexion », file en pause, capot ouvert, plus de ruban, bourrage. Dans ces cas il affiche un message rouge et **n'envoie rien** (sinon Windows garderait l'étiquette en attente et, à l'allumage, toutes les étiquettes demandées entre-temps sortiraient d'un coup). Si Windows affiche un état erroné qui bloque l'impression à tort, mettez `CheckPrinterStatus` à `false` dans `settings.json` (voir plus bas). Si une impression met plus de 60 secondes à être confirmée, le bouton **Imprimer** reste inactif jusqu'à la réponse de Windows (l'étiquette peut encore sortir : regarder la file d'impression avant de réessayer).
 
@@ -98,6 +98,7 @@ Symptômes possibles : étiquette trop longue ou trop courte, plusieurs étiquet
    - image trop grande ou trop petite : ajuster `ModulePx`, `BarHeightPx` ou `MaxWidthPx` ;
    - étiquette trop courte : augmenter `MinLabelLengthMm` ;
    - refus d'imprimer alors que l'imprimante est prête (« hors connexion », « capot ouvert »...) : mettre `CheckPrinterStatus` à `false`.
+   - message « Le pilote ... n'a pas accepté le format de papier de 62 mm » alors que le bon rouleau est chargé : lire dans le diagnostic la section « Test des formats de papier (sans imprimer) » (une ligne par essai, avec la zone imprimable obtenue) et l'envoyer ; pour essayer quand même sans la vérification, mettre `CheckPaper` à `false`.
 
 ## Réglages (settings.json)
 
@@ -117,6 +118,7 @@ Fichier texte JSON modifiable avec le Bloc-notes : `%APPDATA%\BarcodeTray\settin
 | `MinLabelLengthMm` | `15` | Longueur minimale de l'étiquette en mm. |
 | `PaperName` | *(vide)* | Nom exact d'un format de papier du pilote à utiliser tel quel. Vide : choix automatique (ruban continu). |
 | `CheckPrinterStatus` | `true` | Vérifie l'état de l'imprimante dans Windows avant d'imprimer et refuse d'envoyer l'étiquette si elle ne pourrait pas sortir. `false` : aucun contrôle. |
+| `CheckPaper` | `true` | Avant d'imprimer, essaie chaque façon de demander le papier au pilote (sans imprimer) et n'utilise que celle dont la zone imprimable correspond au rouleau ; la page est rallongée des marges non imprimables du pilote. `false` : le format est demandé sans vérification. |
 
 Exemple :
 

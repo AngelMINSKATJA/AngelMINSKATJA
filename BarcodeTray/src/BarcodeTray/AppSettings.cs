@@ -74,6 +74,13 @@ public sealed class AppSettings
     public bool CheckPrinterStatus { get; set; } = true;
 
     /// <summary>
+    /// Vrai (par défaut) : avant d'imprimer, chaque façon de demander le papier est essayée auprès du pilote (sans imprimer)
+    /// et seule celle dont la zone imprimable correspond au ruban est utilisée ; la page est rallongée des marges non
+    /// imprimables du pilote. Faux : le format est demandé sans vérification (ancien comportement).
+    /// </summary>
+    public bool CheckPaper { get; set; } = true;
+
+    /// <summary>
     /// Vrai si le fichier de réglages existait mais n'a pas pu être lu en entier (JSON invalide, valeur de mauvais
     /// type, fichier verrouillé...). Interne : ni lu ni écrit dans le JSON.
     /// </summary>

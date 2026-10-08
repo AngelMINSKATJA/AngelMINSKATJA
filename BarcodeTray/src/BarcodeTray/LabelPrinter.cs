@@ -15,14 +15,48 @@ using System.Text.RegularExpressions;
 namespace BarcodeTray;
 
 /// <summary>Un format de papier connu du pilote (dimensions en centièmes de pouce).</summary>
-internal readonly record struct PaperInfo(string Name, int WidthHundredthsInch, int HeightHundredthsInch);
+/// <param name="RawKind">
+/// Identifiant du formulaire dans le pilote (dmPaperSize, p. ex. 259 pour « 62mm » chez Brother). Sans lui, Windows
+/// ne sait pas quel formulaire demander : le pilote ignore alors la taille et reprend son format par défaut.
+/// </param>
+internal readonly record struct PaperInfo(string Name, int WidthHundredthsInch, int HeightHundredthsInch, int RawKind = 0);
 
 /// <summary>Format de papier retenu pour l'impression.</summary>
 /// <param name="Name">Nom du format (celui du pilote, ou « Custom »).</param>
 /// <param name="WidthHundredthsInch">Largeur en centièmes de pouce.</param>
 /// <param name="UseDriverSizeAsIs">Vrai : utiliser tel quel l'objet PaperSize du pilote (étiquettes prédécoupées).</param>
 /// <param name="Reason">Explication lisible (journal et diagnostic).</param>
-internal readonly record struct PaperChoice(string Name, int WidthHundredthsInch, bool UseDriverSizeAsIs, string Reason);
+/// <param name="RawKind">Identifiant du formulaire du pilote (0 = aucun : format « Custom » synthétique).</param>
+internal readonly record struct PaperChoice(string Name, int WidthHundredthsInch, bool UseDriverSizeAsIs, string Reason, int RawKind = 0);
+
+/// <summary>Une façon de demander le papier au pilote, essayée dans l'ordre jusqu'à ce que le pilote l'accepte.</summary>
+/// <param name="Label">Libellé court pour le journal.</param>
+/// <param name="RawKind">dmPaperSize envoyé au pilote (0 = aucun identifiant).</param>
+/// <param name="FixedLength">Vrai : la longueur est celle du pilote (étiquettes prédécoupées), inutile de la faire varier.</param>
+internal readonly record struct PaperCandidate(
+    string Label, string Name, int RawKind, int WidthHundredthsInch, int HeightHundredthsInch, bool FixedLength);
+
+/// <summary>Verdict d'un essai de format de papier, d'après la zone imprimable annoncée par le pilote.</summary>
+internal enum ProbeVerdict
+{
+    /// <summary>Largeur et hauteur imprimables suffisantes.</summary>
+    Ok,
+
+    /// <summary>La largeur imprimable est trop petite : le pilote n'a pas pris le format en compte.</summary>
+    WidthRejected,
+
+    /// <summary>Largeur correcte mais hauteur imprimable insuffisante pour l'image.</summary>
+    HeightShort,
+
+    /// <summary>Zone imprimable illisible (le pilote ne répond pas) : on ne peut pas juger.</summary>
+    Unreadable,
+
+    /// <summary>Le pilote a levé une erreur en recevant ce format.</summary>
+    Error,
+}
+
+/// <summary>Résultat de l'essai d'un candidat : hauteur de page demandée et zone imprimable obtenue.</summary>
+internal readonly record struct PaperProbe(PaperCandidate Candidate, int PageHeightUnits, RectangleF Area, ProbeVerdict Verdict, string? Detail = null);
 
 /// <summary>
 /// Impression silencieuse (sans boîte de dialogue) d'une étiquette sur rouleau continu, par exemple
@@ -164,7 +198,8 @@ public static class LabelPrinter
                         p.Name ?? wanted,
                         p.WidthHundredthsInch > 0 ? p.WidthHundredthsInch : widthUnits,
                         true,
-                        "Format imposé par le réglage PaperName : « " + p.Name + " », utilisé tel quel.");
+                        "Format imposé par le réglage PaperName : « " + p.Name + " », utilisé tel quel.",
+                        p.RawKind);
                 }
             }
 
@@ -183,7 +218,7 @@ public static class LabelPrinter
             if (p.Name != null && exactName.IsMatch(p.Name))
             {
                 return new PaperChoice(p.Name, WidthOf(p), false,
-                    prefix + "Entrée « " + p.Name + " » du pilote (rouleau continu " + mm + " mm).");
+                    prefix + "Entrée « " + p.Name + " » du pilote (rouleau continu " + mm + " mm).", p.RawKind);
             }
         }
 
@@ -194,7 +229,7 @@ public static class LabelPrinter
                 && p.Name.IndexOfAny(new[] { 'x', 'X', '×', '(' }) < 0)
             {
                 return new PaperChoice(p.Name, WidthOf(p), false,
-                    prefix + "Entrée « " + p.Name + " » du pilote (nom commençant par " + mm + "mm).");
+                    prefix + "Entrée « " + p.Name + " » du pilote (nom commençant par " + mm + "mm).", p.RawKind);
             }
         }
 
@@ -217,11 +252,253 @@ public static class LabelPrinter
             PaperInfo p = byWidth.Value;
             return new PaperChoice(p.Name, WidthOf(p), false,
                 prefix + "Entrée « " + p.Name + " » du pilote, retenue pour sa largeur (" + p.WidthHundredthsInch
-                + "/100 pouce, hauteur " + p.HeightHundredthsInch + ").");
+                + "/100 pouce, hauteur " + p.HeightHundredthsInch + ").", p.RawKind);
         }
 
         return new PaperChoice("Custom", widthUnits, false,
             prefix + "Aucun format de " + mm + " mm dans le pilote : format personnalisé (" + widthUnits + "/100 pouce).");
+    }
+
+    // ------------------------------------------------------------------ essai des formats (pur + pilote)
+
+    /// <summary>dmPaperSize « format défini par l'utilisateur » (DMPAPER_USER) : le pilote lit alors largeur et longueur.</summary>
+    internal const int DmPaperUser = 256;
+
+    /// <summary>
+    /// Fraction de la largeur du ruban en dessous de laquelle la zone imprimable annoncée par le pilote prouve que le
+    /// format demandé n'a pas été pris en compte (p. ex. 102/100 pouce = format 29 mm par défaut pour un ruban 62 mm,
+    /// alors qu'un ruban de 62 mm donne environ 232/244).
+    /// </summary>
+    private const double MinPrintableWidthFraction = 0.8;
+
+    /// <summary>
+    /// Candidats de format de papier, dans l'ordre d'essai. Le pilote Brother (et la plupart des pilotes) ignore une taille
+    /// envoyée sans identifiant de formulaire : le premier candidat réutilise donc l'identifiant du formulaire « 62mm » du
+    /// pilote avec la longueur voulue ; viennent ensuite le formulaire « défini par l'utilisateur », le formulaire du
+    /// pilote tel quel, et en dernier recours l'ancienne méthode sans identifiant (imprimantes virtuelles PDF, etc.).
+    /// </summary>
+    internal static IReadOnlyList<PaperCandidate> BuildPaperCandidates(
+        PaperChoice choice, IReadOnlyList<PaperInfo> available, int tapeWidthUnits, int pageHeightUnits)
+    {
+        available ??= Array.Empty<PaperInfo>();
+        var list = new List<PaperCandidate>();
+
+        if (choice.UseDriverSizeAsIs)
+        {
+            // Étiquettes prédécoupées choisies par l'utilisateur : on garde l'identifiant ET la longueur du pilote.
+            int driverHeight = pageHeightUnits;
+            foreach (PaperInfo p in available)
+            {
+                if (string.Equals(p.Name, choice.Name, StringComparison.OrdinalIgnoreCase) && p.HeightHundredthsInch > 0)
+                {
+                    driverHeight = p.HeightHundredthsInch;
+                    break;
+                }
+            }
+
+            list.Add(new PaperCandidate("formulaire imposé (PaperName)", choice.Name, choice.RawKind,
+                choice.WidthHundredthsInch, driverHeight, true));
+            return list;
+        }
+
+        int driverWidth = choice.WidthHundredthsInch > 0 ? choice.WidthHundredthsInch : tapeWidthUnits;
+        if (choice.RawKind > 0)
+        {
+            list.Add(new PaperCandidate("formulaire du pilote, longueur demandée", choice.Name, choice.RawKind,
+                driverWidth, pageHeightUnits, false));
+        }
+
+        string userName = "Custom";
+        foreach (PaperInfo p in available)
+        {
+            if (p.RawKind == DmPaperUser && !string.IsNullOrWhiteSpace(p.Name))
+            {
+                userName = p.Name;
+                break;
+            }
+        }
+
+        list.Add(new PaperCandidate("format défini par l'utilisateur", userName, DmPaperUser,
+            tapeWidthUnits, pageHeightUnits, false));
+
+        if (choice.RawKind > 0)
+        {
+            int nominal = pageHeightUnits;
+            foreach (PaperInfo p in available)
+            {
+                if (p.RawKind == choice.RawKind && p.HeightHundredthsInch > 0)
+                {
+                    nominal = p.HeightHundredthsInch;
+                    break;
+                }
+            }
+
+            list.Add(new PaperCandidate("formulaire du pilote, longueur du pilote", choice.Name, choice.RawKind,
+                driverWidth, nominal, true));
+        }
+
+        list.Add(new PaperCandidate("format personnalisé sans identifiant", "Custom", 0,
+            tapeWidthUnits, pageHeightUnits, false));
+        return list;
+    }
+
+    /// <summary>Hauteur imprimable nécessaire (centièmes de pouce) : hauteur de l'image, réduite comme elle le sera en largeur.</summary>
+    internal static double NeededPrintableHeight(double naturalWidthUnits, double naturalHeightUnits, double areaWidthUnits)
+    {
+        return naturalHeightUnits * FitScale(naturalWidthUnits, areaWidthUnits);
+    }
+
+    /// <summary>Juge une zone imprimable annoncée par le pilote (voir <see cref="ProbeVerdict"/>).</summary>
+    internal static ProbeVerdict ClassifyProbe(RectangleF area, int tapeWidthUnits, double neededPrintableHeight)
+    {
+        if (area.Width <= 0 || area.Height <= 0)
+        {
+            return ProbeVerdict.Unreadable;
+        }
+
+        if (area.Width < tapeWidthUnits * MinPrintableWidthFraction)
+        {
+            return ProbeVerdict.WidthRejected;
+        }
+
+        return area.Height + 0.5 < neededPrintableHeight ? ProbeVerdict.HeightShort : ProbeVerdict.Ok;
+    }
+
+    /// <summary>
+    /// Hauteur de page à redemander quand la zone imprimable est trop courte : le pilote retire des marges non
+    /// imprimables (environ 3 mm en haut et en bas chez Brother), la page doit donc être plus longue que l'image.
+    /// Ne diminue jamais la hauteur courante.
+    /// </summary>
+    internal static int NextPageHeight(int currentPageUnits, RectangleF area, double neededPrintableHeight, int minPageUnits)
+    {
+        double unprintable = Math.Max(0.0, currentPageUnits - area.Height);
+        int required = (int)Math.Ceiling(neededPrintableHeight + unprintable) + 1;
+        return Math.Max(currentPageUnits, Math.Max(minPageUnits, required));
+    }
+
+    /// <summary>
+    /// Meilleur essai : parmi les essais « Ok », celui dont la zone imprimable est la plus courte (= étiquette la moins
+    /// longue, donc le moins de ruban gaspillé ; à égalité, le premier de la liste). À défaut, le premier essai dont la
+    /// zone était illisible. Null si aucun format n'est exploitable.
+    /// </summary>
+    internal static PaperProbe? SelectProbe(IReadOnlyList<PaperProbe> probes)
+    {
+        PaperProbe? best = null;
+        foreach (PaperProbe p in probes)
+        {
+            if (p.Verdict == ProbeVerdict.Ok && (best == null || p.Area.Height < best.Value.Area.Height - 1.0f))
+            {
+                best = p;
+            }
+        }
+
+        if (best != null)
+        {
+            return best;
+        }
+
+        foreach (PaperProbe p in probes)
+        {
+            if (p.Verdict == ProbeVerdict.Unreadable)
+            {
+                return p;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Taille de papier à donner à .NET : l'identifiant de formulaire est posé APRÈS la construction (sinon il est rejeté).</summary>
+    internal static PaperSize CreatePaperSize(PaperCandidate candidate, int pageHeightUnits)
+    {
+        var size = new PaperSize(candidate.Name, candidate.WidthHundredthsInch, pageHeightUnits);
+        if (candidate.RawKind != 0)
+        {
+            size.RawKind = candidate.RawKind;
+        }
+
+        return size;
+    }
+
+    /// <summary>
+    /// Essaie chaque candidat auprès du pilote SANS imprimer : applique le format, relit la zone imprimable annoncée par le
+    /// pilote et, si elle est trop courte, rallonge la page (jusqu'à 3 essais) pour absorber les marges non imprimables.
+    /// </summary>
+    private static List<PaperProbe> ProbePaper(
+        PrintDocument doc, IReadOnlyList<PaperCandidate> candidates, int tapeWidthUnits,
+        double naturalWidthUnits, double naturalHeightUnits, int minPageUnits)
+    {
+        var results = new List<PaperProbe>();
+        foreach (PaperCandidate candidate in candidates)
+        {
+            int height = candidate.HeightHundredthsInch;
+            PaperProbe probe = new(candidate, height, RectangleF.Empty, ProbeVerdict.Unreadable);
+            try
+            {
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    doc.DefaultPageSettings.PaperSize = CreatePaperSize(candidate, height);
+                    RectangleF area = SafePrintableArea(doc.DefaultPageSettings);
+                    double needed = NeededPrintableHeight(naturalWidthUnits, naturalHeightUnits, area.Width);
+                    probe = new PaperProbe(candidate, height, area, ClassifyProbe(area, tapeWidthUnits, needed));
+                    if (probe.Verdict != ProbeVerdict.HeightShort || candidate.FixedLength)
+                    {
+                        break;
+                    }
+
+                    int next = NextPageHeight(height, area, needed, minPageUnits);
+                    if (next <= height || next > MaxPaperLengthUnits)
+                    {
+                        break;
+                    }
+
+                    height = next;
+                }
+            }
+            catch (Exception ex)
+            {
+                probe = new PaperProbe(candidate, height, RectangleF.Empty, ProbeVerdict.Error, ex.GetType().Name + " : " + ex.Message);
+            }
+
+            results.Add(probe);
+        }
+
+        return results;
+    }
+
+    /// <summary>Ligne lisible d'un essai (journal et diagnostic).</summary>
+    internal static string DescribeProbe(PaperProbe p)
+    {
+        string verdict = p.Verdict switch
+        {
+            ProbeVerdict.Ok => "ACCEPTÉ",
+            ProbeVerdict.WidthRejected => "REFUSÉ : largeur imprimable trop petite (le pilote n'a pas pris le format en compte)",
+            ProbeVerdict.HeightShort => "REFUSÉ : hauteur imprimable insuffisante pour l'image",
+            ProbeVerdict.Unreadable => "zone imprimable illisible (impossible de juger)",
+            _ => "ERREUR : " + (p.Detail ?? "?"),
+        };
+
+        return p.Candidate.Label + " : « " + p.Candidate.Name + " » (id " + p.Candidate.RawKind + ") "
+               + p.Candidate.WidthHundredthsInch + "x" + p.PageHeightUnits + " /100 pouce -> zone imprimable "
+               + FormatRect(p.Area) + " -> " + verdict;
+    }
+
+    /// <summary>Message (français) quand le pilote n'a accepté aucun format.</summary>
+    internal static string NoUsablePaperMessage(string printerName, IReadOnlyList<PaperProbe> probes, int tapeWidthMm)
+    {
+        float widest = 0f;
+        foreach (PaperProbe p in probes)
+        {
+            widest = Math.Max(widest, p.Area.Width);
+        }
+
+        string seen = widest > 0
+            ? " La zone imprimable annoncée par le pilote est de " + UnitsToMm((int)Math.Round(widest)).ToString("0", CultureInfo.InvariantCulture) + " mm."
+            : string.Empty;
+        return "Le pilote de « " + printerName + " » n'a pas accepté le format de papier de " + tapeWidthMm.ToString(CultureInfo.InvariantCulture)
+               + " mm." + seen + " Rien n'a été envoyé. Vérifiez que le bon rouleau est chargé et que ce format existe dans les "
+               + "options d'impression du pilote, puis utilisez « Copier le diagnostic d'impression » dans le menu de l'icône. "
+               + "Pour essayer quand même, mettez CheckPaper à false dans settings.json.";
     }
 
     // ------------------------------------------------------------------ géométrie (pure)
@@ -361,15 +638,13 @@ public static class LabelPrinter
         doc.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
         doc.DefaultPageSettings.Landscape = false;
 
-        // Formats de papier du pilote.
+        // Formats de papier du pilote (avec leur identifiant de formulaire : sans lui, le pilote ignore la taille).
         var infos = new List<PaperInfo>();
-        var driverSizes = new List<PaperSize>();
         try
         {
             foreach (PaperSize ps in doc.PrinterSettings.PaperSizes)
             {
-                infos.Add(new PaperInfo(ps.PaperName, ps.Width, ps.Height));
-                driverSizes.Add(ps);
+                infos.Add(new PaperInfo(ps.PaperName, ps.Width, ps.Height, ps.RawKind));
             }
         }
         catch (Exception ex)
@@ -378,45 +653,47 @@ public static class LabelPrinter
         }
 
         PaperChoice choice = ChoosePaper(infos, s.LabelWidthMm, s.PaperName);
+        int tapeUnits = MmToUnits(s.LabelWidthMm);
         int minUnits = MmToUnits(s.MinLabelLengthMm);
-        PaperSize paper;
-        if (choice.UseDriverSizeAsIs)
+        int startHeight = Math.Max(minUnits, (int)Math.Ceiling(naturalH));
+        IReadOnlyList<PaperCandidate> candidates = BuildPaperCandidates(choice, infos, tapeUnits, startHeight);
+
+        PaperCandidate usedCandidate;
+        int pageHeight;
+        if (s.CheckPaper)
         {
-            paper = driverSizes.FirstOrDefault(p => string.Equals(p.PaperName, choice.Name, StringComparison.OrdinalIgnoreCase))
-                    ?? new PaperSize(choice.Name, choice.WidthHundredthsInch, Math.Max(minUnits, (int)Math.Ceiling(naturalH)));
-            doc.DefaultPageSettings.PaperSize = paper;
+            // On demande chaque format au pilote SANS imprimer et on ne garde que celui qu'il a vraiment pris en compte.
+            List<PaperProbe> probes = ProbePaper(doc, candidates, tapeUnits, naturalW, naturalH, minUnits);
+            foreach (PaperProbe p in probes)
+            {
+                Log.Info("Papier, essai - " + DescribeProbe(p));
+            }
+
+            PaperProbe selected = SelectProbe(probes)
+                                  ?? throw new PrintFailure(NoUsablePaperMessage(printerName, probes, s.LabelWidthMm));
+            usedCandidate = selected.Candidate;
+            pageHeight = selected.PageHeightUnits;
+            doc.DefaultPageSettings.PaperSize = CreatePaperSize(usedCandidate, pageHeight);
         }
         else
         {
-            int heightUnits = Math.Max(minUnits, (int)Math.Ceiling(naturalH));
-            paper = new PaperSize(choice.Name, choice.WidthHundredthsInch, heightUnits);
-            doc.DefaultPageSettings.PaperSize = paper;
-
-            // Si l'image doit être réduite pour tenir dans la zone imprimable, la longueur du papier suit.
-            RectangleF area = SafePrintableArea(doc.DefaultPageSettings);
-            if (area.Width > 0)
-            {
-                double fit = FitScale(naturalW, area.Width);
-                int fittedHeight = Math.Max(minUnits, (int)Math.Ceiling(naturalH * fit));
-                if (fittedHeight != heightUnits)
-                {
-                    heightUnits = fittedHeight;
-                    paper = new PaperSize(choice.Name, choice.WidthHundredthsInch, heightUnits);
-                    doc.DefaultPageSettings.PaperSize = paper;
-                }
-            }
-
-            if (heightUnits > MaxPaperLengthUnits)
-            {
-                throw new PrintFailure("L'étiquette est trop longue pour l'imprimante (" + UnitsToMm(heightUnits).ToString("0", CultureInfo.InvariantCulture)
-                                       + " mm). Raccourcissez le texte.");
-            }
+            usedCandidate = candidates[0];
+            pageHeight = usedCandidate.HeightHundredthsInch;
+            doc.DefaultPageSettings.PaperSize = CreatePaperSize(usedCandidate, pageHeight);
+            Log.Warn("CheckPaper = false : format demandé sans vérification (" + usedCandidate.Label + ").");
         }
 
-        Log.Info("Impression : imprimante « " + printerName + " », papier « " + paper.PaperName + " » "
-                 + paper.Width + "x" + paper.Height + " (1/100 pouce) [" + choice.Reason + "], image "
-                 + image.Width + "x" + image.Height + " px à " + imageDpiX.ToString("0.##", CultureInfo.InvariantCulture)
-                 + " dpi, zone imprimable " + FormatRect(SafePrintableArea(doc.DefaultPageSettings)) + ".");
+        if (pageHeight > MaxPaperLengthUnits)
+        {
+            throw new PrintFailure("L'étiquette est trop longue pour l'imprimante (" + UnitsToMm(pageHeight).ToString("0", CultureInfo.InvariantCulture)
+                                   + " mm). Raccourcissez le texte.");
+        }
+
+        Log.Info("Impression : imprimante « " + printerName + " », papier « " + usedCandidate.Name + " » (id "
+                 + usedCandidate.RawKind + ", " + usedCandidate.Label + ") " + usedCandidate.WidthHundredthsInch + "x" + pageHeight
+                 + " (1/100 pouce) [" + choice.Reason + "], image " + image.Width + "x" + image.Height + " px à "
+                 + imageDpiX.ToString("0.##", CultureInfo.InvariantCulture) + " dpi, zone imprimable "
+                 + FormatRect(SafePrintableArea(doc.DefaultPageSettings)) + ".");
 
         Exception? pageError = null;
         bool printed = false;
@@ -667,7 +944,7 @@ public static class LabelPrinter
         {
             foreach (PaperSize p in ps.PaperSizes)
             {
-                infos.Add(new PaperInfo(p.PaperName, p.Width, p.Height));
+                infos.Add(new PaperInfo(p.PaperName, p.Width, p.Height, p.RawKind));
                 sb.AppendLine("  « " + p.PaperName + " »  kind=" + p.Kind + " (raw " + p.RawKind + ")  "
                               + p.Width + "x" + p.Height + " /100 pouce = "
                               + UnitsToMm(p.Width).ToString("0.0", CultureInfo.InvariantCulture) + " x "
@@ -710,7 +987,38 @@ public static class LabelPrinter
         sb.AppendLine("Format retenu     : « " + choice.Name + " » largeur " + choice.WidthHundredthsInch
                       + "/100 pouce, tel quel : " + choice.UseDriverSizeAsIs);
         sb.AppendLine("Raison            : " + choice.Reason);
+        sb.AppendLine("Identifiant pilote : " + choice.RawKind + (choice.RawKind == 0 ? " (aucun : format synthétique)" : string.Empty));
         sb.AppendLine("Longueur minimale : " + s.MinLabelLengthMm + " mm = " + MmToUnits(s.MinLabelLengthMm) + "/100 pouce");
+        sb.AppendLine("Vérification papier : " + (s.CheckPaper ? "active" : "désactivée (CheckPaper = false)"));
+
+        sb.AppendLine();
+        sb.AppendLine("--- Test des formats de papier (sans imprimer) ---");
+        Guard(sb, "essai des formats", () =>
+        {
+            using var doc = new PrintDocument();
+            doc.PrinterSettings.PrinterName = printerName;
+            doc.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
+            doc.DefaultPageSettings.Landscape = false;
+
+            int tape = MmToUnits(s.LabelWidthMm);
+            int min = MmToUnits(s.MinLabelLengthMm);
+            // Étiquette type : ~ 672 x 227 points à 300 dpi (24 caractères).
+            double sampleW = Math.Min(s.MaxWidthPx, 672) * 100.0 / s.Dpi;
+            double sampleH = (s.BarHeightPx + 77) * 100.0 / s.Dpi;
+            int start = Math.Max(min, (int)Math.Ceiling(sampleH));
+
+            List<PaperProbe> probes = ProbePaper(doc, BuildPaperCandidates(choice, infos, tape, start), tape, sampleW, sampleH, min);
+            foreach (PaperProbe probe in probes)
+            {
+                sb.AppendLine("  " + DescribeProbe(probe));
+            }
+
+            PaperProbe? selected = SelectProbe(probes);
+            sb.AppendLine(selected == null
+                ? "Format qui serait utilisé : AUCUN (l'impression serait refusée)"
+                : "Format qui serait utilisé : " + selected.Value.Candidate.Label + ", page " + selected.Value.PageHeightUnits
+                  + "/100 pouce (" + UnitsToMm(selected.Value.PageHeightUnits).ToString("0.0", CultureInfo.InvariantCulture) + " mm de long)");
+        });
     }
 
     // ------------------------------------------------------------------ utilitaires
