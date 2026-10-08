@@ -48,7 +48,7 @@ internal enum ProbeVerdict
     /// <summary>Largeur correcte mais hauteur imprimable insuffisante pour l'image.</summary>
     HeightShort,
 
-    /// <summary>Zone imprimable illisible (le pilote ne répond pas) : on ne peut pas juger.</summary>
+    /// <summary>Zone imprimable illisible (le pilote ne répond pas) : on ne peut pas juger (page rallongée d'une marge forfaitaire).</summary>
     Unreadable,
 
     /// <summary>Le pilote a levé une erreur en recevant ce format.</summary>
@@ -67,6 +67,13 @@ public static class LabelPrinter
     private const string DocumentName = "Code-barres Code 128";
     private const int MaxPaperLengthUnits = 4000; // ~ 1 m, limite des QL
     private const double FitTolerance = 1.02;     // 2 % de débordement toléré (zone de silence rognée)
+    private const int MaxGrowAttempts = 3;        // essais de rallongement de la page par candidat
+
+    /// <summary>
+    /// Marge forfaitaire (centièmes de pouce) ajoutée à la hauteur de l'image quand la zone imprimable du pilote est
+    /// illisible : environ 3 mm de marge non imprimable en haut et en bas chez Brother (2 x 12 mesurés sur QL-800) + 1.
+    /// </summary>
+    internal const int BlindMarginAllowanceUnits = 25;
 
     // ------------------------------------------------------------------ imprimantes
 
@@ -351,7 +358,7 @@ public static class LabelPrinter
     /// <summary>Juge une zone imprimable annoncée par le pilote (voir <see cref="ProbeVerdict"/>).</summary>
     internal static ProbeVerdict ClassifyProbe(RectangleF area, int tapeWidthUnits, double neededPrintableHeight)
     {
-        if (area.Width <= 0 || area.Height <= 0)
+        if (!float.IsFinite(area.Width) || !float.IsFinite(area.Height) || area.Width <= 0 || area.Height <= 0)
         {
             return ProbeVerdict.Unreadable;
         }
@@ -421,9 +428,101 @@ public static class LabelPrinter
     }
 
     /// <summary>
-    /// Essaie chaque candidat auprès du pilote SANS imprimer : applique le format, relit la zone imprimable annoncée par le
-    /// pilote et, si elle est trop courte, rallonge la page (jusqu'à 3 essais) pour absorber les marges non imprimables.
+    /// Largeur de référence du ruban (centièmes de pouce) pour juger la zone imprimable : celle du formulaire quand
+    /// l'utilisateur en impose un (PaperName : un format plus étroit que LabelWidthMm est alors légitime), sinon celle
+    /// calculée depuis LabelWidthMm.
     /// </summary>
+    internal static int ReferenceTapeUnits(PaperChoice choice, int labelWidthMm)
+    {
+        return choice.UseDriverSizeAsIs && choice.WidthHundredthsInch > 0 ? choice.WidthHundredthsInch : MmToUnits(labelWidthMm);
+    }
+
+    /// <summary>
+    /// Hauteur de page sans mesure possible de la zone imprimable : hauteur de l'image + marge forfaitaire
+    /// (<see cref="BlindMarginAllowanceUnits"/>), au moins la longueur minimale, au plus la longueur maximale.
+    /// </summary>
+    internal static int BlindPageHeight(double naturalHeightUnits, int minPageUnits)
+    {
+        int wanted = (int)Math.Ceiling(naturalHeightUnits) + BlindMarginAllowanceUnits;
+        return Math.Max(minPageUnits, Math.Min(MaxPaperLengthUnits, wanted));
+    }
+
+    /// <summary>
+    /// Essaie un candidat SANS imprimer. <paramref name="measure"/> applique une hauteur de page au pilote et renvoie la
+    /// zone imprimable qu'il annonce. Si elle est trop courte, la page est rallongée (jusqu'à 3 essais) pour absorber les
+    /// marges non imprimables du pilote ; si elle est illisible, la page reçoit une marge forfaitaire. Les formats
+    /// à longueur imposée (étiquettes prédécoupées) ne sont jamais rallongés.
+    /// </summary>
+    internal static PaperProbe ProbeCandidate(
+        PaperCandidate candidate, Func<int, RectangleF> measure, int tapeWidthUnits,
+        double naturalWidthUnits, double naturalHeightUnits, int minPageUnits)
+    {
+        int height = candidate.HeightHundredthsInch;
+        PaperProbe probe = new(candidate, height, RectangleF.Empty, ProbeVerdict.Unreadable);
+        try
+        {
+            for (int attempt = 0; attempt < MaxGrowAttempts; attempt++)
+            {
+                RectangleF area = measure(height);
+                double needed = NeededPrintableHeight(naturalWidthUnits, naturalHeightUnits, area.Width);
+                ProbeVerdict verdict = ClassifyProbe(area, tapeWidthUnits, needed);
+                if (verdict == ProbeVerdict.Unreadable && !candidate.FixedLength)
+                {
+                    // Marges du pilote inconnues : mieux vaut une page trop longue de quelques millimètres qu'un texte rogné.
+                    height = Math.Max(height, BlindPageHeight(naturalHeightUnits, minPageUnits));
+                }
+
+                probe = new PaperProbe(candidate, height, area, verdict);
+                if (verdict != ProbeVerdict.HeightShort || candidate.FixedLength)
+                {
+                    break;
+                }
+
+                int next = NextPageHeight(height, area, needed, minPageUnits);
+                if (next <= height || next > MaxPaperLengthUnits)
+                {
+                    break;
+                }
+
+                height = next;
+            }
+        }
+        catch (Exception ex)
+        {
+            probe = new PaperProbe(candidate, height, RectangleF.Empty, ProbeVerdict.Error, ex.GetType().Name + " : " + ex.Message);
+        }
+
+        return probe;
+    }
+
+    /// <summary>
+    /// Hauteur de page à demander pour un candidat utilisé SANS vérification (CheckPaper = false) : même rallongement que
+    /// pour un essai (marges du pilote mesurées, ou marge forfaitaire si la zone est illisible), quel que soit le verdict
+    /// sur la largeur, puisque c'est l'image elle-même qui serait rognée sinon.
+    /// </summary>
+    internal static int GrowPage(
+        PaperCandidate candidate, Func<int, RectangleF> measure, double naturalWidthUnits, double naturalHeightUnits, int minPageUnits)
+    {
+        if (candidate.FixedLength)
+        {
+            return candidate.HeightHundredthsInch;
+        }
+
+        // Largeur de référence 0 : ClassifyProbe ne renvoie alors jamais WidthRejected, seule la hauteur compte ici.
+        return ProbeCandidate(candidate, measure, 0, naturalWidthUnits, naturalHeightUnits, minPageUnits).PageHeightUnits;
+    }
+
+    /// <summary>Mesure d'un candidat auprès du pilote : applique la hauteur de page puis relit la zone imprimable annoncée.</summary>
+    private static Func<int, RectangleF> Measurer(PrintDocument doc, PaperCandidate candidate)
+    {
+        return height =>
+        {
+            doc.DefaultPageSettings.PaperSize = CreatePaperSize(candidate, height);
+            return SafePrintableArea(doc.DefaultPageSettings);
+        };
+    }
+
+    /// <summary>Essaie chaque candidat auprès du pilote SANS imprimer (voir <see cref="ProbeCandidate"/>).</summary>
     private static List<PaperProbe> ProbePaper(
         PrintDocument doc, IReadOnlyList<PaperCandidate> candidates, int tapeWidthUnits,
         double naturalWidthUnits, double naturalHeightUnits, int minPageUnits)
@@ -431,36 +530,8 @@ public static class LabelPrinter
         var results = new List<PaperProbe>();
         foreach (PaperCandidate candidate in candidates)
         {
-            int height = candidate.HeightHundredthsInch;
-            PaperProbe probe = new(candidate, height, RectangleF.Empty, ProbeVerdict.Unreadable);
-            try
-            {
-                for (int attempt = 0; attempt < 3; attempt++)
-                {
-                    doc.DefaultPageSettings.PaperSize = CreatePaperSize(candidate, height);
-                    RectangleF area = SafePrintableArea(doc.DefaultPageSettings);
-                    double needed = NeededPrintableHeight(naturalWidthUnits, naturalHeightUnits, area.Width);
-                    probe = new PaperProbe(candidate, height, area, ClassifyProbe(area, tapeWidthUnits, needed));
-                    if (probe.Verdict != ProbeVerdict.HeightShort || candidate.FixedLength)
-                    {
-                        break;
-                    }
-
-                    int next = NextPageHeight(height, area, needed, minPageUnits);
-                    if (next <= height || next > MaxPaperLengthUnits)
-                    {
-                        break;
-                    }
-
-                    height = next;
-                }
-            }
-            catch (Exception ex)
-            {
-                probe = new PaperProbe(candidate, height, RectangleF.Empty, ProbeVerdict.Error, ex.GetType().Name + " : " + ex.Message);
-            }
-
-            results.Add(probe);
+            results.Add(ProbeCandidate(
+                candidate, Measurer(doc, candidate), tapeWidthUnits, naturalWidthUnits, naturalHeightUnits, minPageUnits));
         }
 
         return results;
@@ -483,22 +554,57 @@ public static class LabelPrinter
                + FormatRect(p.Area) + " -> " + verdict;
     }
 
-    /// <summary>Message (français) quand le pilote n'a accepté aucun format.</summary>
+    /// <summary>
+    /// Message (français) quand le pilote n'a accepté aucun format. Doit rester court : l'écran coupe l'état à 400
+    /// caractères (préfixe « Échec de l'impression : » compris). Deux cas : la hauteur imprimable est trop courte (au
+    /// moins un essai a pris la largeur en compte), ou le format n'a pas été pris en compte du tout.
+    /// </summary>
     internal static string NoUsablePaperMessage(string printerName, IReadOnlyList<PaperProbe> probes, int tapeWidthMm)
     {
-        float widest = 0f;
-        foreach (PaperProbe p in probes)
+        string name = printerName ?? string.Empty;
+        if (name.Length > 40)
         {
-            widest = Math.Max(widest, p.Area.Width);
+            name = name.Substring(0, 39) + "…"; // un nom de file démesuré ne doit pas couper la fin du message
         }
 
-        string seen = widest > 0
-            ? " La zone imprimable annoncée par le pilote est de " + UnitsToMm((int)Math.Round(widest)).ToString("0", CultureInfo.InvariantCulture) + " mm."
-            : string.Empty;
-        return "Le pilote de « " + printerName + " » n'a pas accepté le format de papier de " + tapeWidthMm.ToString(CultureInfo.InvariantCulture)
-               + " mm." + seen + " Rien n'a été envoyé. Vérifiez que le bon rouleau est chargé et que ce format existe dans les "
-               + "options d'impression du pilote, puis utilisez « Copier le diagnostic d'impression » dans le menu de l'icône. "
-               + "Pour essayer quand même, mettez CheckPaper à false dans settings.json.";
+        string mm = tapeWidthMm.ToString(CultureInfo.InvariantCulture);
+        float widest = 0f;
+        float tallestShort = 0f;
+        bool heightShort = false;
+        foreach (PaperProbe p in probes)
+        {
+            if (float.IsFinite(p.Area.Width))
+            {
+                widest = Math.Max(widest, p.Area.Width);
+            }
+
+            if (p.Verdict == ProbeVerdict.HeightShort)
+            {
+                heightShort = true;
+                if (float.IsFinite(p.Area.Height))
+                {
+                    tallestShort = Math.Max(tallestShort, p.Area.Height);
+                }
+            }
+        }
+
+        const string Diagnostic = " puis utilisez « Copier le diagnostic d'impression » (menu de l'icône).";
+        if (heightShort)
+        {
+            return "Le pilote de « " + name + " » a pris en compte le format de " + mm + " mm, mais sa hauteur imprimable ("
+                   + UnitsToMmText(tallestShort) + " mm) est plus courte que l'étiquette. Rien n'a été envoyé. "
+                   + "Choisissez un format plus long (réglage PaperName) ou réduisez BarHeightPx dans settings.json," + Diagnostic;
+        }
+
+        string seen = widest > 0 ? " (zone imprimable : " + UnitsToMmText(widest) + " mm)" : string.Empty;
+        return "Le pilote de « " + name + " » n'a pas pris en compte le format de " + mm + " mm" + seen
+               + ". Rien n'a été envoyé. Vérifiez que ce format existe dans les options du pilote," + Diagnostic
+               + " Dernier recours : CheckPaper à false dans settings.json.";
+    }
+
+    private static string UnitsToMmText(float units)
+    {
+        return UnitsToMm((int)Math.Round(units)).ToString("0", CultureInfo.InvariantCulture);
     }
 
     // ------------------------------------------------------------------ géométrie (pure)
@@ -653,7 +759,8 @@ public static class LabelPrinter
         }
 
         PaperChoice choice = ChoosePaper(infos, s.LabelWidthMm, s.PaperName);
-        int tapeUnits = MmToUnits(s.LabelWidthMm);
+        int tapeUnits = ReferenceTapeUnits(choice, s.LabelWidthMm);
+        int tapeMm = (int)Math.Round(UnitsToMm(tapeUnits));
         int minUnits = MmToUnits(s.MinLabelLengthMm);
         int startHeight = Math.Max(minUnits, (int)Math.Ceiling(naturalH));
         IReadOnlyList<PaperCandidate> candidates = BuildPaperCandidates(choice, infos, tapeUnits, startHeight);
@@ -670,17 +777,20 @@ public static class LabelPrinter
             }
 
             PaperProbe selected = SelectProbe(probes)
-                                  ?? throw new PrintFailure(NoUsablePaperMessage(printerName, probes, s.LabelWidthMm));
+                                  ?? throw new PrintFailure(NoUsablePaperMessage(printerName, probes, tapeMm));
             usedCandidate = selected.Candidate;
             pageHeight = selected.PageHeightUnits;
             doc.DefaultPageSettings.PaperSize = CreatePaperSize(usedCandidate, pageHeight);
         }
         else
         {
+            // Sans vérification, la page est quand même rallongée des marges non imprimables du pilote (sinon le texte
+            // sous les barres est rogné sans aucune erreur).
             usedCandidate = candidates[0];
-            pageHeight = usedCandidate.HeightHundredthsInch;
+            pageHeight = GrowPage(usedCandidate, Measurer(doc, usedCandidate), naturalW, naturalH, minUnits);
             doc.DefaultPageSettings.PaperSize = CreatePaperSize(usedCandidate, pageHeight);
-            Log.Warn("CheckPaper = false : format demandé sans vérification (" + usedCandidate.Label + ").");
+            Log.Warn("CheckPaper = false : format demandé sans vérification (" + usedCandidate.Label + "), page de "
+                     + pageHeight + "/100 pouce.");
         }
 
         if (pageHeight > MaxPaperLengthUnits)
@@ -1000,17 +1110,33 @@ public static class LabelPrinter
             doc.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
             doc.DefaultPageSettings.Landscape = false;
 
-            int tape = MmToUnits(s.LabelWidthMm);
+            int tape = ReferenceTapeUnits(choice, s.LabelWidthMm);
             int min = MmToUnits(s.MinLabelLengthMm);
             // Étiquette type : ~ 672 x 227 points à 300 dpi (24 caractères).
             double sampleW = Math.Min(s.MaxWidthPx, 672) * 100.0 / s.Dpi;
             double sampleH = (s.BarHeightPx + 77) * 100.0 / s.Dpi;
             int start = Math.Max(min, (int)Math.Ceiling(sampleH));
 
-            List<PaperProbe> probes = ProbePaper(doc, BuildPaperCandidates(choice, infos, tape, start), tape, sampleW, sampleH, min);
+            IReadOnlyList<PaperCandidate> candidates = BuildPaperCandidates(choice, infos, tape, start);
+            List<PaperProbe> probes = ProbePaper(doc, candidates, tape, sampleW, sampleH, min);
+            if (!s.CheckPaper)
+            {
+                sb.AppendLine("  (CheckPaper = false : essais donnés à titre indicatif, l'impression ne les utilise pas.)");
+            }
+
             foreach (PaperProbe probe in probes)
             {
                 sb.AppendLine("  " + DescribeProbe(probe));
+            }
+
+            if (!s.CheckPaper)
+            {
+                // Chemin réel de PrintCore sans vérification : premier candidat, page rallongée, aucun refus possible.
+                PaperCandidate first = candidates[0];
+                int page = GrowPage(first, Measurer(doc, first), sampleW, sampleH, min);
+                sb.AppendLine("Format qui serait utilisé (CheckPaper = false, sans vérification) : " + first.Label + ", page " + page
+                              + "/100 pouce (" + UnitsToMm(page).ToString("0.0", CultureInfo.InvariantCulture) + " mm de long)");
+                return;
             }
 
             PaperProbe? selected = SelectProbe(probes);

@@ -76,7 +76,8 @@ public sealed class AppSettings
     /// <summary>
     /// Vrai (par défaut) : avant d'imprimer, chaque façon de demander le papier est essayée auprès du pilote (sans imprimer)
     /// et seule celle dont la zone imprimable correspond au ruban est utilisée ; la page est rallongée des marges non
-    /// imprimables du pilote. Faux : le format est demandé sans vérification (ancien comportement).
+    /// imprimables du pilote. Faux : le premier format est demandé sans vérification et sans refus possible (la page est
+    /// quand même rallongée des marges du pilote, mesurées ou estimées, pour ne pas rogner le texte).
     /// </summary>
     public bool CheckPaper { get; set; } = true;
 
