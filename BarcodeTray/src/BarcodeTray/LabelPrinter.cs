@@ -607,6 +607,64 @@ public static class LabelPrinter
         return UnitsToMm((int)Math.Round(units)).ToString("0", CultureInfo.InvariantCulture);
     }
 
+    // ------------------------------------------------------------------ étiquettes de longueur fixe (en série)
+
+    /// <summary>Papier préparé pour une série d'étiquettes de longueur fixe : format accepté par le pilote, zone imprimable.</summary>
+    internal sealed class FixedPaper
+    {
+        internal FixedPaper(PaperCandidate candidate, int pageWidthUnits, int pageHeightUnits, RectangleF printableArea, bool lengthHonored, string description)
+        {
+            Candidate = candidate;
+            PageWidthUnits = pageWidthUnits;
+            PageHeightUnits = pageHeightUnits;
+            PrintableArea = printableArea;
+            LengthHonored = lengthHonored;
+            Description = description;
+        }
+
+        internal PaperCandidate Candidate { get; }
+
+        /// <summary>Largeur du papier, centièmes de pouce.</summary>
+        internal int PageWidthUnits { get; }
+
+        /// <summary>Longueur du papier demandée, centièmes de pouce.</summary>
+        internal int PageHeightUnits { get; }
+
+        /// <summary>Zone imprimable annoncée par le pilote (X, Y, largeur, hauteur), centièmes de pouce, origine = coin du papier.</summary>
+        internal RectangleF PrintableArea { get; }
+
+        /// <summary>Faux si le pilote semble imposer sa propre longueur au lieu de celle demandée.</summary>
+        internal bool LengthHonored { get; }
+
+        /// <summary>Texte lisible pour le journal.</summary>
+        internal string Description { get; }
+    }
+
+    /// <summary>
+    /// Demande au pilote un papier de la largeur du ruban et de la longueur <paramref name="lengthMm"/> (sans imprimer) et
+    /// renvoie ce qu'il a réellement accepté. Lève <see cref="InvalidOperationException"/> (message français) sinon.
+    /// </summary>
+    internal static FixedPaper PrepareFixedPaper(string printerName, AppSettings settings, double lengthMm)
+        => throw new NotImplementedException();
+
+    /// <summary>
+    /// Imprime UNE étiquette (un travail d'impression = une coupe) : <paramref name="pageImage"/> est l'image de la page entière
+    /// (voir <see cref="PlanLabelRenderer.Render"/>), dessinée à sa taille réelle, calée sur le coin du papier.
+    /// Lève <see cref="InvalidOperationException"/> (message français) en cas d'échec.
+    /// </summary>
+    internal static void PrintFullPage(Bitmap pageImage, string printerName, AppSettings settings, FixedPaper paper)
+        => throw new NotImplementedException();
+
+    /// <summary>
+    /// Rectangle de destination (centièmes de pouce, origine = coin de la zone imprimable) d'une image de page entière :
+    /// taille physique exacte, décalée de (-X, -Y) de la zone imprimable pour que l'image soit calée sur le coin du papier,
+    /// alignée sur les points de l'imprimante.
+    /// </summary>
+    internal static RectangleF ComputeFullPageDestination(
+        int imageWidthPx, int imageHeightPx, float imageDpiX, float imageDpiY,
+        RectangleF printableAreaUnits, float deviceDpiX, float deviceDpiY)
+        => throw new NotImplementedException();
+
     // ------------------------------------------------------------------ géométrie (pure)
 
     /// <summary>Facteur de réduction (1 = taille réelle) pour que l'image tienne dans la zone imprimable.</summary>

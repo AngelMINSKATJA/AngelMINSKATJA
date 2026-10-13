@@ -81,6 +81,32 @@ public sealed class AppSettings
     /// </summary>
     public bool CheckPaper { get; set; } = true;
 
+    // ------------------------------------------------------------------ étiquettes en série (plans de châssis)
+
+    /// <summary>Longueur de l'étiquette en série, en mm (62 x 40 mm par défaut).</summary>
+    public int BatchLabelLengthMm { get; set; } = 40;
+
+    /// <summary>Police du type de châssis et du numéro de plan.</summary>
+    public string BatchFontName { get; set; } = "Arial";
+
+    /// <summary>Taille du type de châssis (en haut à gauche), en points typographiques.</summary>
+    public float BatchTypeFontPt { get; set; } = 23f;
+
+    /// <summary>Taille du numéro de plan (centré en dessous), en points typographiques.</summary>
+    public float BatchPlanFontPt { get; set; } = 61f;
+
+    /// <summary>Distance entre le bord gauche de l'étiquette et le bord gauche du type de châssis, en mm.</summary>
+    public float BatchTypeLeftMm { get; set; } = 1.9f;
+
+    /// <summary>Distance entre le haut de l'étiquette et la ligne de base du type de châssis, en mm.</summary>
+    public float BatchTypeBaselineMm { get; set; } = 10.6f;
+
+    /// <summary>Distance entre le haut de l'étiquette et la ligne de base du numéro de plan, en mm.</summary>
+    public float BatchPlanBaselineMm { get; set; } = 32.0f;
+
+    /// <summary>Vrai (par défaut) : demande une confirmation avant d'imprimer plusieurs étiquettes d'un coup.</summary>
+    public bool BatchConfirm { get; set; } = true;
+
     /// <summary>
     /// Vrai si le fichier de réglages existait mais n'a pas pu être lu en entier (JSON invalide, valeur de mauvais
     /// type, fichier verrouillé...). Interne : ni lu ni écrit dans le JSON.
@@ -139,8 +165,26 @@ public sealed class AppSettings
         LabelWidthMm = Math.Clamp(LabelWidthMm, 10, 300);
         MinLabelLengthMm = Math.Clamp(MinLabelLengthMm, 0, 1000);
 
+        BatchLabelLengthMm = Math.Clamp(BatchLabelLengthMm, 10, 300);
+        BatchFontName = string.IsNullOrWhiteSpace(BatchFontName) ? DefaultFontName : BatchFontName.Trim();
+        BatchTypeFontPt = ClampFinite(BatchTypeFontPt, 4f, 200f, 23f);
+        BatchPlanFontPt = ClampFinite(BatchPlanFontPt, 4f, 300f, 61f);
+        BatchTypeLeftMm = ClampFinite(BatchTypeLeftMm, 0f, 60f, 1.9f);
+        BatchTypeBaselineMm = ClampFinite(BatchTypeBaselineMm, 1f, 300f, 10.6f);
+        BatchPlanBaselineMm = ClampFinite(BatchPlanBaselineMm, 1f, 300f, 32.0f);
+
         PrinterName = NullIfBlank(PrinterName);
         PaperName = NullIfBlank(PaperName);
+    }
+
+    private static float ClampFinite(float value, float min, float max, float fallback)
+    {
+        if (float.IsNaN(value) || float.IsInfinity(value))
+        {
+            return fallback;
+        }
+
+        return Math.Clamp(value, min, max);
     }
 
     /// <summary>Copie indépendante (pour travailler sans risque depuis un autre thread).</summary>
