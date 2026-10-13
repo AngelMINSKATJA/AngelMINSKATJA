@@ -125,6 +125,8 @@ Au maximum 5 000 étiquettes par collage. Si le texte collé n'est pas un tablea
 
 ### 4. Imprimer
 
+> **Première fois : faites un essai de 2 ou 3 étiquettes, pas les 88 d'un coup.** Sélectionnez 2 ou 3 lignes dans la liste (Ctrl+clic), cliquez sur **Imprimer la sélection**, puis comparez avec une étiquette faite sous P-touch : position de « HB1 », numéro bien centré et non coupé, longueur 40 mm. Si quelque chose est décalé ou coupé, ne lancez pas la série : envoyez-moi le diagnostic (clic droit sur l'icône, *Copier le diagnostic d'impression*) et une photo de l'étiquette.
+
 1. Choisissez l'imprimante (la **Brother QL-800** est présélectionnée) et, si besoin, le nombre de **Copies par étiquette** (1 à 99).
 2. Cliquez sur :
    - **Imprimer tout** : toute la liste ;
@@ -140,6 +142,7 @@ Pendant l'impression, seul le bouton **Arrêter** est actif et la fenêtre ne pe
 
 ### Arrêter, reprendre
 
+- **`✔ imprimée` veut dire « envoyée à Windows »**, pas « sortie de l'imprimante ». Windows reçoit les étiquettes en quelques secondes et les envoie ensuite une par une à la QL-800, qui peut donc imprimer encore un moment après que la liste affiche `✔ imprimée` partout. **Arrêter ne rappelle pas les étiquettes déjà envoyées** : elles sortiront quand même, sauf si vous videz la file d'impression de Windows (Paramètres, Imprimantes et scanners, la QL-800, *Ouvrir la file d'attente*, menu *Imprimante*, *Annuler tous les documents*). Si le rouleau est fini ou si l'imprimante se bloque en cours de série, la liste peut afficher des `✔` alors que des étiquettes attendent dans la file : regardez la file, laissez-la finir après avoir rechargé le rouleau (ou videz-la), et ne relancez qu'à partir de la première étiquette qui n'est vraiment pas sortie, pour éviter les doublons.
 - **Arrêter** : la série s'arrête **avant l'étiquette suivante** (celle qui est en cours d'envoi se termine). Le message dit combien d'étiquettes sont parties et sur quelle ligne reprendre. Pour reprendre : sélectionnez la ligne indiquée, puis **Imprimer à partir de la sélection**. Si vous cliquez sur **Imprimer tout** à la place, le programme prévient que des lignes sont déjà marquées `✔ imprimée` et demande s'il faut les refaire : répondez **Non** pour n'imprimer que le reste.
 - **En cas d'échec** (imprimante éteinte, plus de ruban, capot ouvert, câble débranché...), la série **s'arrête tout de suite sur cette ligne** et le message rouge dit laquelle et pourquoi. Le programme **ne réessaie jamais tout seul** : il pourrait sortir deux fois la même étiquette. Corrigez le problème (rallumer, remettre un rouleau...), puis sélectionnez la ligne en échec (déjà sélectionnée pour vous) et cliquez sur **Imprimer à partir de la sélection** : les étiquettes déjà marquées `✔ imprimée` ne sont pas refaites.
 - **`? à vérifier`** : Windows n'a pas confirmé l'envoi en 60 secondes (spouleur bloqué, imprimante qui ne répond plus). Regardez la **file d'impression de Windows** (Paramètres, Imprimantes et scanners, la QL-800, *Ouvrir la file d'attente*) : l'étiquette est peut-être sortie. Tant que Windows n'a pas répondu, les boutons d'impression restent inactifs (sinon l'étiquette sortirait en double plus tard). Quand c'est réglé, reprenez à cette ligne, ou à la suivante si l'étiquette est bien sortie.
