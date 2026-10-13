@@ -42,6 +42,7 @@ internal sealed class MainForm : Form
     private readonly Button _btnPrint = new();
     private readonly CheckBox _chkStartup = new();
     private readonly Label _lblStatus = new();
+    private readonly LinkLabel _lnkBatch = new();
     private readonly ToolTip _toolTip = new();
 
     private Icon? _formIcon;
@@ -165,6 +166,9 @@ internal sealed class MainForm : Form
     /// <summary>Déclenché quand l'utilisateur ferme (X, Alt+F4, Échap) ou réduit la fenêtre : elle passe dans la zone de notification.</summary>
     public event EventHandler? HiddenByUser;
 
+    /// <summary>Déclenché par le lien « Étiquettes en série… » : la fenêtre des étiquettes en série doit s'ouvrir.</summary>
+    public event EventHandler? BatchRequested;
+
     // ------------------------------------------------------------------ construction
 
     private void BuildUi()
@@ -181,7 +185,7 @@ internal sealed class MainForm : Form
         MinimizeBox = true;
         ShowInTaskbar = true;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(540, 270);
+        ClientSize = new Size(540, 296);
         _formIcon = TrayApplicationContext.LoadAppIcon();
         if (_formIcon != null)
         {
@@ -241,11 +245,18 @@ internal sealed class MainForm : Form
         _lblStatus.Text = HintText;
         _lblStatus.UseMnemonic = false;
 
+        _lnkBatch.Text = "Étiquettes en série…";
+        _lnkBatch.AutoSize = true;
+        _lnkBatch.Anchor = AnchorStyles.Left;
+        _lnkBatch.Margin = new Padding(3, 6, 3, 3);
+        _lnkBatch.TabIndex = 5;
+        _lnkBatch.AccessibleName = "Étiquettes en série";
+
         var table = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 6,
+            RowCount = 7,
             Padding = new Padding(12),
         };
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
@@ -256,6 +267,7 @@ internal sealed class MainForm : Form
         table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         table.Controls.Add(lblText, 0, 0);
         table.SetColumnSpan(lblText, 2);
@@ -269,6 +281,8 @@ internal sealed class MainForm : Form
         table.SetColumnSpan(_chkStartup, 2);
         table.Controls.Add(_lblStatus, 0, 5);
         table.SetColumnSpan(_lblStatus, 2);
+        table.Controls.Add(_lnkBatch, 0, 6);
+        table.SetColumnSpan(_lnkBatch, 2);
 
         Controls.Add(table);
 
@@ -276,6 +290,7 @@ internal sealed class MainForm : Form
 
         _toolTip.SetToolTip(_btnGenerate, "Copie le code-barres (image) dans le presse-papier : collez-le avec Ctrl+V dans Word ou Excel.");
         _toolTip.SetToolTip(_btnPrint, "Imprime l'étiquette tout de suite sur l'imprimante choisie.");
+        _toolTip.SetToolTip(_lnkBatch, "Imprimer en série des étiquettes de plans de châssis à partir d'un tableau Excel.");
 
         _btnGenerate.Click += OnGenerateClick;
         _btnPrint.Click += OnPrintClick;
@@ -284,6 +299,7 @@ internal sealed class MainForm : Form
         _cmbPrinter.DropDown += OnPrinterDropDown;
         _cmbPrinter.SelectedIndexChanged += OnPrinterSelectionChanged;
         _chkStartup.CheckedChanged += OnStartupCheckedChanged;
+        _lnkBatch.LinkClicked += OnBatchLinkClicked;
 
         ResumeLayout(false);
         PerformLayout();
@@ -598,6 +614,19 @@ internal sealed class MainForm : Form
         catch (Exception ex)
         {
             Log.Error("Mémorisation de l'imprimante impossible.", ex);
+        }
+    }
+
+    private void OnBatchLinkClicked(object? sender, LinkLabelLinkClickedEventArgs e)
+    {
+        try
+        {
+            BatchRequested?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Ouverture des étiquettes en série impossible.", ex);
+            SetStatus("Impossible d'ouvrir les étiquettes en série : " + ex.Message, StatusKind.Error);
         }
     }
 

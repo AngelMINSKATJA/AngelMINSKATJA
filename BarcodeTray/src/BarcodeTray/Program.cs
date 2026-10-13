@@ -50,6 +50,11 @@ internal static class Program
             return RunSelfTest(args);
         }
 
+        if (args.Length > 0 && IsFlag(args[0], "--selftest-label"))
+        {
+            return RunSelfTestLabel(args);
+        }
+
         bool startInTray = HasFlag(args, "--tray");
         Log.Info("Démarrage (version " + typeof(Program).Assembly.GetName().Version + ", arguments : "
                  + (args.Length == 0 ? "(aucun)" : string.Join(" ", args)) + ", exécutable : "
@@ -160,6 +165,94 @@ internal static class Program
         {
             Log.Error("Auto-test en échec.", ex);
             WriteError("Auto-test en échec : " + ex);
+            return 2;
+        }
+    }
+
+    /// <summary>
+    /// --selftest-label sortie.png : sans interface, dessine l'étiquette d'exemple « HB1 » / « 22062 » (page 62 x 40 mm,
+    /// zone imprimable du QL-800 : 6 ; 11,67 ; 232 x 134 centièmes de pouce) avec les réglages par défaut et l'écrit en PNG.
+    /// Vérifie au passage que le texte est bien dessiné (encre présente, à l'endroit annoncé, dans la zone imprimable).
+    /// Code 0 si tout va bien, 2 (message sur la sortie d'erreur) sinon.
+    /// </summary>
+    internal static int RunSelfTestLabel(string[] args)
+    {
+        try
+        {
+            if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
+            {
+                WriteError("Usage : BarcodeTray.exe --selftest-label <fichier.png>");
+                return 2;
+            }
+
+            string outputPath = Path.GetFullPath(args[1]);
+            string? directory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            const int pageWidthUnits = 244;   // 62 mm
+            const int pageHeightUnits = 157;  // 40 mm
+            var printable = new RectangleF(6f, 11.67f, 232f, 134f);
+            var settings = new AppSettings();
+
+            using Bitmap bitmap = PlanLabelRenderer.Render("HB1", "22062", settings, pageWidthUnits, pageHeightUnits, printable, out PlanLabelLayout layout);
+            int expectedWidth = PlanLabelRenderer.PageSizePx(pageWidthUnits, settings.Dpi);
+            int expectedHeight = PlanLabelRenderer.PageSizePx(pageHeightUnits, settings.Dpi);
+            if (bitmap.Width != expectedWidth || bitmap.Height != expectedHeight)
+            {
+                WriteError("Dimensions inattendues : " + bitmap.Width + "x" + bitmap.Height + " au lieu de " + expectedWidth + "x" + expectedHeight + ".");
+                return 2;
+            }
+
+            Rectangle ink = PlanLabelRenderer.FindInkBounds(bitmap);
+            if (ink.IsEmpty)
+            {
+                WriteError("L'étiquette générée est vide (aucun texte dessiné).");
+                return 2;
+            }
+
+            // Le dessin doit correspondre à la mise en page annoncée (à quelques points près : bords lissés)...
+            RectangleF expected = RectangleF.Union(layout.TypeInkPx, layout.PlanInkPx);
+            const float tolerancePx = 3f;
+            if (ink.Left < expected.Left - tolerancePx || ink.Top < expected.Top - tolerancePx
+                || ink.Right > expected.Right + tolerancePx || ink.Bottom > expected.Bottom + tolerancePx
+                || ink.Left > expected.Left + tolerancePx || ink.Top > expected.Top + tolerancePx
+                || ink.Right < expected.Right - tolerancePx || ink.Bottom < expected.Bottom - tolerancePx)
+            {
+                WriteError("Le texte n'est pas dessiné là où la mise en page l'annonce : encre " + ink + ", attendu " + expected + ".");
+                return 2;
+            }
+
+            // ... et rester dans la largeur imprimable de l'imprimante.
+            float perUnit = settings.Dpi / 100f;
+            float printableLeft = printable.X * perUnit;
+            float printableRight = (printable.X + printable.Width) * perUnit;
+            if (ink.Left < printableLeft - 1f || ink.Right > printableRight + 1f)
+            {
+                WriteError("Le texte dépasse la zone imprimable (" + ink.Left + " à " + ink.Right + " pour " + printableLeft + " à " + printableRight + ").");
+                return 2;
+            }
+
+            byte[] png = BarcodeRenderer.ToPng(bitmap);
+            if (png.Length < 100 || png[0] != 0x89 || png[1] != (byte)'P' || png[2] != (byte)'N' || png[3] != (byte)'G')
+            {
+                WriteError("Le PNG généré est invalide.");
+                return 2;
+            }
+
+            File.WriteAllBytes(outputPath, png);
+
+            Log.Info("Auto-test étiquette réussi : " + outputPath + " (" + bitmap.Width + "x" + bitmap.Height + " px, "
+                     + png.Length + " octets, police « " + layout.FontName + " », type " + layout.TypePt + " pt, plan "
+                     + layout.PlanPt + " pt).");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Auto-test étiquette en échec.", ex);
+            WriteError("Auto-test étiquette en échec : " + ex);
             return 2;
         }
     }

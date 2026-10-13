@@ -26,6 +26,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly AppSettings _settings;
     private readonly Control _marshal;
     private readonly MainForm _form;
+    private BatchForm? _batchForm; // créée au premier besoin, réutilisée ensuite (fermer = masquer)
     private readonly NotifyIcon _notifyIcon;
     private readonly ContextMenuStrip _menu;
     private readonly ToolStripMenuItem _startupItem;
@@ -49,12 +50,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _form.HiddenByUser += OnFormHiddenByUser;
         _form.Deactivate += (_, _) => _formDeactivatedTick = Environment.TickCount64;
         _form.FormClosed += OnFormClosed;
+        _form.BatchRequested += (_, _) => Safe("Étiquettes en série", ShowBatchWindowCore);
 
         _menu = new ContextMenuStrip();
         var openItem = new ToolStripMenuItem("Ouvrir");
         _boldFont = new Font(openItem.Font, FontStyle.Bold);
         openItem.Font = _boldFont;
         openItem.Click += (_, _) => Safe("Ouvrir", ShowMainWindowCore);
+
+        var batchItem = new ToolStripMenuItem("Étiquettes en série (tableau Excel)…");
+        batchItem.Click += (_, _) => Safe("Étiquettes en série", ShowBatchWindowCore);
 
         _startupItem = new ToolStripMenuItem("Lancer au démarrage de Windows");
         _startupItem.Click += (_, _) => Safe("Démarrage automatique", ToggleStartup);
@@ -63,9 +68,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
         diagItem.Click += OnCopyDiagnosticsClick;
 
         var exitItem = new ToolStripMenuItem("Quitter");
-        exitItem.Click += (_, _) => Safe("Quitter", ExitApplication);
+        exitItem.Click += (_, _) => Safe("Quitter", ExitFromMenu);
 
         _menu.Items.Add(openItem);
+        _menu.Items.Add(batchItem);
         _menu.Items.Add(_startupItem);
         _menu.Items.Add(diagItem);
         _menu.Items.Add(new ToolStripSeparator());
@@ -105,6 +111,45 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     /// <summary>La fenêtre principale (pour les tests).</summary>
     internal MainForm Window => _form;
+
+    /// <summary>La fenêtre « Étiquettes en série » (null tant qu'elle n'a pas été ouverte ; pour les tests).</summary>
+    internal BatchForm? BatchWindow => _batchForm;
+
+    /// <summary>
+    /// Affiche la fenêtre « Étiquettes en série » au premier plan (la crée si besoin). Peut être appelée depuis n'importe quel
+    /// thread : l'appel est renvoyé, sans attente, vers le thread d'interface.
+    /// </summary>
+    public void ShowBatchWindow()
+    {
+        try
+        {
+            if (_disposed || _marshal.IsDisposed || !_marshal.IsHandleCreated)
+            {
+                return;
+            }
+
+            if (_marshal.InvokeRequired)
+            {
+                _marshal.BeginInvoke(new Action(ShowBatchWindowCore));
+            }
+            else
+            {
+                ShowBatchWindowCore();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // fermeture en cours
+        }
+        catch (InvalidOperationException)
+        {
+            // poignée détruite pendant l'appel : fermeture en cours
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Affichage des étiquettes en série demandé impossible.", ex);
+        }
+    }
 
     /// <summary>
     /// Affiche la fenêtre principale au premier plan. Peut être appelée depuis n'importe quel thread
@@ -250,6 +295,20 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
             try
             {
+                if (_batchForm != null)
+                {
+                    _batchForm.AllowExit = true;
+                    _batchForm.Dispose();
+                    _batchForm = null;
+                }
+            }
+            catch
+            {
+                // ignoré
+            }
+
+            try
+            {
                 _form.AllowExit = true;
                 _form.Dispose();
             }
@@ -284,6 +343,53 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         Safe("Afficher la fenêtre", _form.ShowAndFocus);
+    }
+
+    private void ShowBatchWindowCore()
+    {
+        if (_disposed || _exiting)
+        {
+            return;
+        }
+
+        if (_batchForm == null || _batchForm.IsDisposed)
+        {
+            _batchForm = new BatchForm(_settings, s => s.Save());
+            _batchForm.FormClosed += OnBatchFormClosed;
+        }
+
+        Safe("Afficher les étiquettes en série", _batchForm.ShowAndFocus);
+    }
+
+    /// <summary>La fenêtre des étiquettes en série a été fermée pour de vrai : elle sera recréée à la prochaine ouverture.</summary>
+    private void OnBatchFormClosed(object? sender, FormClosedEventArgs e)
+    {
+        if (sender is BatchForm closed && ReferenceEquals(closed, _batchForm))
+        {
+            _batchForm = null;
+        }
+    }
+
+    /// <summary>« Quitter » du menu : si une série d'étiquettes est en cours d'impression, demande confirmation.</summary>
+    private void ExitFromMenu()
+    {
+        BatchForm? batch = _batchForm;
+        if (batch != null && !batch.IsDisposed && batch.IsPrinting)
+        {
+            DialogResult answer = MessageBox.Show(
+                "Une série d'étiquettes est en cours d'impression.\n\nQuitter l'arrête tout de suite "
+                + "(l'étiquette en cours d'envoi peut ne pas sortir). Quitter quand même ?",
+                "Étiquettes en série",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes)
+            {
+                return;
+            }
+        }
+
+        ExitApplication();
     }
 
     private void ToggleMainWindow()

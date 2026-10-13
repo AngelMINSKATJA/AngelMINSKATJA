@@ -640,12 +640,315 @@ public static class LabelPrinter
         internal string Description { get; }
     }
 
+    private const string BatchDocumentName = "Étiquettes en série";
+
+    /// <summary>Longueur minimale (mm) acceptée pour une étiquette en série.</summary>
+    internal const double MinFixedLengthMm = 10.0;
+
+    /// <summary>
+    /// Hauteur imprimable « nécessaire » (centièmes de pouce) lors de l'essai d'un papier de longueur imposée : la longueur
+    /// est celle demandée, jamais rallongée. Seule la largeur imprimable compte pour juger le format ; 1 suffit pour que
+    /// tout candidat de largeur plausible soit « Ok » sans que la page soit agrandie.
+    /// </summary>
+    internal const double FixedProbeNeededUnits = 1.0;
+
+    /// <summary>Écart toléré (centièmes de pouce) entre le bas de la zone imprimable et la longueur de page demandée.</summary>
+    internal const double LengthToleranceUnits = 2.0;
+
+    /// <summary>
+    /// Marge basse non imprimable maximale plausible (centièmes de pouce, environ 8 mm ; 12 = 3 mm mesurés sur QL-800) : une
+    /// zone imprimable qui s'arrête bien plus haut prouve que le pilote a raccourci la page (p. ex. format 29 mm repris).
+    /// </summary>
+    internal const double MaxBottomMarginUnits = 30.0;
+
+    /// <summary>Comparaison de la zone imprimable annoncée par le pilote avec la longueur de page attendue.</summary>
+    internal enum FixedLengthCheck
+    {
+        /// <summary>Le bas de la zone imprimable est compatible avec la longueur attendue (marge basse normale).</summary>
+        Honored,
+
+        /// <summary>Zone illisible : impossible de juger.</summary>
+        Unknown,
+
+        /// <summary>Le pilote impose une page plus longue que celle demandée.</summary>
+        TooLong,
+
+        /// <summary>Le pilote a raccourci la page : le bas de l'étiquette serait rogné.</summary>
+        TooShort,
+    }
+
+    /// <summary>Vrai si la zone est exploitable (valeurs finies, largeur et hauteur positives).</summary>
+    internal static bool IsUsableArea(RectangleF area)
+    {
+        return float.IsFinite(area.X) && float.IsFinite(area.Y) && float.IsFinite(area.Width) && float.IsFinite(area.Height)
+               && area.Width > 0 && area.Height > 0;
+    }
+
+    /// <summary>
+    /// Convertit la longueur d'étiquette demandée (mm) en centièmes de pouce. Renvoie faux (et un message français) si elle
+    /// est absurde (non numérique, trop courte, plus longue que le maximum des imprimantes QL).
+    /// </summary>
+    internal static bool TryGetFixedPageHeight(double lengthMm, out int heightUnits, out string? error)
+    {
+        heightUnits = 0;
+        error = null;
+        double maxMm = UnitsToMm(MaxPaperLengthUnits);
+        if (!double.IsFinite(lengthMm) || lengthMm < MinFixedLengthMm || lengthMm > maxMm)
+        {
+            error = "La longueur d'étiquette demandée n'est pas valide (entre " + MinFixedLengthMm.ToString("0", CultureInfo.InvariantCulture)
+                    + " et " + maxMm.ToString("0", CultureInfo.InvariantCulture) + " mm). Corrigez BatchLabelLengthMm dans settings.json.";
+            return false;
+        }
+
+        heightUnits = MmToUnits(lengthMm);
+        return true;
+    }
+
+    /// <summary>
+    /// Compare le bas de la zone imprimable (Y + hauteur) à la longueur de page attendue : sur une page de la bonne longueur,
+    /// le bas de la zone imprimable est entre (longueur - marge basse du pilote) et (longueur + tolérance).
+    /// </summary>
+    internal static FixedLengthCheck CheckFixedLength(RectangleF printableArea, int expectedPageHeightUnits)
+    {
+        if (!IsUsableArea(printableArea))
+        {
+            return FixedLengthCheck.Unknown;
+        }
+
+        double bottom = (double)printableArea.Y + printableArea.Height;
+        if (bottom > expectedPageHeightUnits + LengthToleranceUnits)
+        {
+            return FixedLengthCheck.TooLong;
+        }
+
+        return bottom < expectedPageHeightUnits - MaxBottomMarginUnits ? FixedLengthCheck.TooShort : FixedLengthCheck.Honored;
+    }
+
+    /// <summary>
+    /// Vrai si le pilote semble respecter la longueur de page attendue : bas de la zone imprimable (Y + hauteur) au plus
+    /// <paramref name="expectedPageHeightUnits"/> + 2 (centièmes de pouce), et pas anormalement plus haut. Une zone illisible
+    /// ne permet pas de juger : vrai (rien ne prouve que le pilote impose sa longueur).
+    /// </summary>
+    internal static bool IsLengthHonored(RectangleF printableArea, int expectedPageHeightUnits)
+    {
+        FixedLengthCheck check = CheckFixedLength(printableArea, expectedPageHeightUnits);
+        return check == FixedLengthCheck.Honored || check == FixedLengthCheck.Unknown;
+    }
+
+    /// <summary>
+    /// Essaie chaque candidat auprès du pilote SANS imprimer, pour une longueur de page imposée : la hauteur imprimable
+    /// nécessaire est minuscule (<see cref="FixedProbeNeededUnits"/>), donc la page n'est jamais rallongée et seul le critère
+    /// de largeur compte. <paramref name="measurerFor"/> donne, pour un candidat, la fonction « hauteur de page demandée ->
+    /// zone imprimable annoncée ».
+    /// </summary>
+    internal static List<PaperProbe> ProbeFixedCandidates(
+        IReadOnlyList<PaperCandidate> candidates, Func<PaperCandidate, Func<int, RectangleF>> measurerFor, int tapeWidthUnits)
+    {
+        var results = new List<PaperProbe>();
+        foreach (PaperCandidate candidate in candidates)
+        {
+            // Largeur naturelle = hauteur naturelle = 1 : FitScale vaut 1, la hauteur nécessaire reste égale à 1.
+            results.Add(ProbeCandidate(candidate, measurerFor(candidate), tapeWidthUnits, 1.0, FixedProbeNeededUnits, 1));
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Décision pure : choisit parmi les essais le papier des étiquettes en série (voir <see cref="SelectProbe"/> : zone
+    /// imprimable la plus courte = celle qui respecte la longueur demandée) et le décrit. Null si aucun essai n'est exploitable.
+    /// </summary>
+    /// <param name="probes">Essais des candidats.</param>
+    /// <param name="requestedHeightUnits">Longueur d'étiquette demandée (centièmes de pouce).</param>
+    /// <param name="formImposed">Vrai si l'utilisateur impose un formulaire du pilote (PaperName) : sa longueur est alors celle attendue.</param>
+    /// <param name="extraNote">Phrase ajoutée à la description (p. ex. vérification désactivée).</param>
+    internal static FixedPaper? DecideFixedPaper(
+        IReadOnlyList<PaperProbe> probes, int requestedHeightUnits, bool formImposed, string? extraNote = null)
+    {
+        PaperProbe? selected = SelectProbe(probes);
+        if (selected == null)
+        {
+            return null;
+        }
+
+        PaperProbe probe = selected.Value;
+        PaperCandidate candidate = probe.Candidate;
+        int expected = formImposed ? probe.PageHeightUnits : requestedHeightUnits;
+        FixedLengthCheck check = CheckFixedLength(probe.Area, expected);
+        bool honored = check == FixedLengthCheck.Honored || check == FixedLengthCheck.Unknown;
+        string description = DescribeFixedPaper(probe, requestedHeightUnits, formImposed, check);
+        if (!string.IsNullOrWhiteSpace(extraNote))
+        {
+            description += " " + extraNote.Trim();
+        }
+
+        return new FixedPaper(candidate, candidate.WidthHundredthsInch, probe.PageHeightUnits, probe.Area, honored, description);
+    }
+
+    /// <summary>Description lisible (français) du papier retenu, avec une alerte claire si la longueur n'est pas respectée.</summary>
+    internal static string DescribeFixedPaper(PaperProbe probe, int requestedHeightUnits, bool formImposed, FixedLengthCheck check)
+    {
+        PaperCandidate c = probe.Candidate;
+        var sb = new StringBuilder();
+        sb.Append("Papier « ").Append(c.Name).Append(" » (id ").Append(c.RawKind).Append(", ").Append(c.Label).Append("), ")
+          .Append(c.WidthHundredthsInch).Append(" x ").Append(probe.PageHeightUnits).Append(" /100 pouce (")
+          .Append(UnitsToMmText(c.WidthHundredthsInch)).Append(" x ").Append(UnitsToMmText(probe.PageHeightUnits))
+          .Append(" mm), zone imprimable ").Append(FormatRect(probe.Area)).Append('.');
+
+        if (formImposed)
+        {
+            sb.Append(" Format imposé par PaperName : la longueur est celle du pilote (").Append(UnitsToMmText(probe.PageHeightUnits))
+              .Append(" mm), BatchLabelLengthMm n'est pas utilisé.");
+        }
+
+        switch (check)
+        {
+            case FixedLengthCheck.Unknown:
+                sb.Append(" Zone imprimable illisible : longueur non vérifiée.");
+                break;
+            case FixedLengthCheck.TooLong:
+                {
+                    // Longueur réelle estimée : bas de la zone imprimable + une marge basse voisine de la marge haute.
+                    double estimated = (double)probe.Area.Y + probe.Area.Height + Math.Max(0.0, probe.Area.Y);
+                    sb.Append(" ATTENTION : le pilote semble imposer sa propre longueur (environ ")
+                      .Append(UnitsToMmText((float)estimated)).Append(" mm) au lieu des ")
+                      .Append(UnitsToMmText(requestedHeightUnits)).Append(" mm demandés : les étiquettes seront plus longues que prévu. ")
+                      .Append("Vérifiez dans les options du pilote que le format « 62mm » accepte une longueur personnalisée.");
+                    break;
+                }
+
+            case FixedLengthCheck.TooShort:
+                sb.Append(" ATTENTION : la zone imprimable du pilote s'arrête à ")
+                  .Append(UnitsToMmText((float)((double)probe.Area.Y + probe.Area.Height)))
+                  .Append(" mm du haut, bien avant les ").Append(UnitsToMmText(formImposed ? probe.PageHeightUnits : requestedHeightUnits))
+                  .Append(" mm de l'étiquette : le bas risque d'être rogné.");
+                break;
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>Formats de papier du pilote (avec leur identifiant de formulaire), liste vide et journal si illisibles.</summary>
+    private static List<PaperInfo> ReadPaperInfos(PrintDocument doc)
+    {
+        var infos = new List<PaperInfo>();
+        try
+        {
+            foreach (PaperSize ps in doc.PrinterSettings.PaperSizes)
+            {
+                infos.Add(new PaperInfo(ps.PaperName, ps.Width, ps.Height, ps.RawKind));
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("Formats de papier du pilote illisibles : " + ex.Message);
+        }
+
+        return infos;
+    }
+
     /// <summary>
     /// Demande au pilote un papier de la largeur du ruban et de la longueur <paramref name="lengthMm"/> (sans imprimer) et
     /// renvoie ce qu'il a réellement accepté. Lève <see cref="InvalidOperationException"/> (message français) sinon.
     /// </summary>
     internal static FixedPaper PrepareFixedPaper(string printerName, AppSettings settings, double lengthMm)
-        => throw new NotImplementedException();
+    {
+        if (string.IsNullOrWhiteSpace(printerName))
+        {
+            throw new InvalidOperationException("Aucune imprimante sélectionnée.");
+        }
+
+        AppSettings s = (settings ?? new AppSettings()).Clone();
+        s.Validate();
+        string printer = printerName.Trim();
+
+        try
+        {
+            return PrepareFixedPaperCore(printer, s, lengthMm, writeLog: true);
+        }
+        catch (Exception ex)
+        {
+            throw ToFriendlyException(ex, printer, "Préparation du papier des étiquettes en série");
+        }
+    }
+
+    private static FixedPaper PrepareFixedPaperCore(string printerName, AppSettings s, double lengthMm, bool writeLog)
+    {
+        if (!TryGetFixedPageHeight(lengthMm, out int requestedHeight, out string? lengthError))
+        {
+            throw new PrintFailure(lengthError ?? "Longueur d'étiquette invalide.");
+        }
+
+        using var doc = new PrintDocument();
+        doc.PrinterSettings.PrinterName = printerName;
+        if (!doc.PrinterSettings.IsValid)
+        {
+            throw new PrintFailure(
+                "L'imprimante « " + printerName + " » est introuvable ou indisponible. Vérifiez qu'elle est branchée "
+                + "et allumée, puis sélectionnez-la à nouveau dans la liste.");
+        }
+
+        doc.DocumentName = BatchDocumentName;
+        doc.PrintController = new StandardPrintController();
+        doc.OriginAtMargins = false;
+        doc.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
+        doc.DefaultPageSettings.Landscape = false;
+
+        List<PaperInfo> infos = ReadPaperInfos(doc);
+        PaperChoice choice = ChoosePaper(infos, s.LabelWidthMm, s.PaperName);
+        int tapeUnits = ReferenceTapeUnits(choice, s.LabelWidthMm);
+        int tapeMm = (int)Math.Round(UnitsToMm(tapeUnits));
+        IReadOnlyList<PaperCandidate> candidates = BuildPaperCandidates(choice, infos, tapeUnits, requestedHeight);
+
+        FixedPaper? decided;
+        if (s.CheckPaper)
+        {
+            // Chaque façon de demander le papier est essayée SANS imprimer ; on garde celle qui respecte la longueur demandée.
+            List<PaperProbe> probes = ProbeFixedCandidates(candidates, c => Measurer(doc, c), tapeUnits);
+            if (writeLog)
+            {
+                foreach (PaperProbe p in probes)
+                {
+                    Log.Info("Étiquettes en série, essai du papier - " + DescribeProbe(p));
+                }
+            }
+
+            decided = DecideFixedPaper(probes, requestedHeight, choice.UseDriverSizeAsIs)
+                      ?? throw new PrintFailure(NoUsablePaperMessage(printerName, probes, tapeMm));
+        }
+        else
+        {
+            // Sans vérification : premier candidat appliqué tel quel, zone imprimable relue au mieux (aucun refus possible).
+            PaperCandidate first = candidates[0];
+            int height = first.HeightHundredthsInch;
+            doc.DefaultPageSettings.PaperSize = CreatePaperSize(first, height);
+            RectangleF area = SafePrintableArea(doc.DefaultPageSettings);
+            var probe = new PaperProbe(first, height, area, IsUsableArea(area) ? ProbeVerdict.Ok : ProbeVerdict.Unreadable);
+            decided = DecideFixedPaper(
+                          new[] { probe }, requestedHeight, choice.UseDriverSizeAsIs,
+                          "Vérification du papier désactivée (CheckPaper = false) : format demandé sans contrôle.")
+                      ?? throw new PrintFailure("Impossible de préparer le papier des étiquettes en série.");
+            if (writeLog)
+            {
+                Log.Warn("CheckPaper = false : papier des étiquettes en série demandé sans vérification (" + first.Label + ").");
+            }
+        }
+
+        if (writeLog)
+        {
+            string message = "Étiquettes en série : imprimante « " + printerName + " » [" + choice.Reason + "] " + decided.Description;
+            if (decided.LengthHonored)
+            {
+                Log.Info(message);
+            }
+            else
+            {
+                Log.Warn(message);
+            }
+        }
+
+        return decided;
+    }
 
     /// <summary>
     /// Imprime UNE étiquette (un travail d'impression = une coupe) : <paramref name="pageImage"/> est l'image de la page entière
@@ -653,17 +956,222 @@ public static class LabelPrinter
     /// Lève <see cref="InvalidOperationException"/> (message français) en cas d'échec.
     /// </summary>
     internal static void PrintFullPage(Bitmap pageImage, string printerName, AppSettings settings, FixedPaper paper)
-        => throw new NotImplementedException();
+    {
+        if (pageImage == null)
+        {
+            throw new ArgumentNullException(nameof(pageImage));
+        }
+
+        if (paper == null)
+        {
+            throw new ArgumentNullException(nameof(paper));
+        }
+
+        if (string.IsNullOrWhiteSpace(printerName))
+        {
+            throw new InvalidOperationException("Aucune imprimante sélectionnée.");
+        }
+
+        AppSettings s = (settings ?? new AppSettings()).Clone();
+        s.Validate();
+        string printer = printerName.Trim();
+
+        try
+        {
+            PrintFullPageCore(pageImage, printer, s, paper);
+        }
+        catch (Exception ex)
+        {
+            throw ToFriendlyException(ex, printer, "Étiquette en série");
+        }
+    }
+
+    private static void PrintFullPageCore(Bitmap image, string printerName, AppSettings s, FixedPaper paper)
+    {
+        float imageDpiX = image.HorizontalResolution > 0 ? image.HorizontalResolution : s.Dpi;
+        float imageDpiY = image.VerticalResolution > 0 ? image.VerticalResolution : imageDpiX;
+
+        using var doc = new PrintDocument();
+        doc.PrinterSettings.PrinterName = printerName;
+        if (!doc.PrinterSettings.IsValid)
+        {
+            throw new PrintFailure(
+                "L'imprimante « " + printerName + " » est introuvable ou indisponible. Vérifiez qu'elle est branchée "
+                + "et allumée, puis sélectionnez-la à nouveau dans la liste.");
+        }
+
+        if (s.CheckPrinterStatus)
+        {
+            CheckPrinterReady(printerName);
+        }
+
+        doc.DocumentName = BatchDocumentName;
+        doc.PrintController = new StandardPrintController(); // pas de fenêtre « Impression en cours »
+        doc.PrinterSettings.Copies = 1;
+        doc.OriginAtMargins = false;
+        doc.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
+        doc.DefaultPageSettings.Landscape = false;
+
+        // Même formulaire (avec son identifiant : sans lui le pilote l'ignore) et même longueur que lors de la préparation.
+        doc.DefaultPageSettings.PaperSize = CreatePaperSize(paper.Candidate, paper.PageHeightUnits);
+
+        double naturalW = image.Width * 100.0 / imageDpiX;
+        double naturalH = image.Height * 100.0 / imageDpiY;
+        if (Math.Abs(naturalW - paper.PageWidthUnits) > LengthToleranceUnits || Math.Abs(naturalH - paper.PageHeightUnits) > LengthToleranceUnits)
+        {
+            Log.Warn("Étiquette en série : l'image (" + naturalW.ToString("0.#", CultureInfo.InvariantCulture) + " x "
+                     + naturalH.ToString("0.#", CultureInfo.InvariantCulture) + " /100 pouce) n'a pas la taille du papier ("
+                     + paper.PageWidthUnits + " x " + paper.PageHeightUnits + ").");
+        }
+
+        Exception? pageError = null;
+        bool printed = false;
+        doc.PrintPage += (sender, e) =>
+        {
+            try
+            {
+                DrawFullPage(e, image, imageDpiX, imageDpiY, paper);
+                printed = true;
+            }
+            catch (Exception ex)
+            {
+                pageError = ex;
+                e.Cancel = true;
+            }
+        };
+
+        doc.Print();
+
+        if (pageError != null)
+        {
+            throw new PrintFailure("Impossible de dessiner l'étiquette (" + pageError.Message + ").", pageError);
+        }
+
+        string? noPage = DescribeNoPageProblem(printed, pageError);
+        if (noPage != null)
+        {
+            Log.Warn("Étiquette en série : " + noPage);
+            throw new PrintFailure(noPage);
+        }
+    }
+
+    private static void DrawFullPage(PrintPageEventArgs e, Bitmap image, float imageDpiX, float imageDpiY, FixedPaper paper)
+    {
+        Graphics g = e.Graphics ?? throw new InvalidOperationException("Surface d'impression indisponible.");
+
+        // Zone imprimable du travail en cours ; à défaut, celle relevée à la préparation ; à défaut, aucun décalage.
+        RectangleF area = SafePrintableArea(e.PageSettings);
+        if (!IsUsableArea(area))
+        {
+            area = paper.PrintableArea;
+        }
+
+        if (!IsUsableArea(area))
+        {
+            Log.Warn("Étiquette en série : zone imprimable illisible, image posée sans décalage.");
+            area = RectangleF.Empty;
+        }
+
+        RectangleF dest = ComputeFullPageDestination(image.Width, image.Height, imageDpiX, imageDpiY, area, g.DpiX, g.DpiY);
+
+        Log.Info("Étiquette en série : image " + image.Width + "x" + image.Height + " px à "
+                 + imageDpiX.ToString("0.##", CultureInfo.InvariantCulture) + " dpi, zone " + FormatRect(area)
+                 + ", destination " + FormatRect(dest) + ", résolution imprimante "
+                 + g.DpiX.ToString("0", CultureInfo.InvariantCulture) + "x" + g.DpiY.ToString("0", CultureInfo.InvariantCulture) + " dpi.");
+
+        // Aucun lissage ni rééchantillonnage : l'image est déjà à la résolution de l'imprimante.
+        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+        g.PixelOffsetMode = PixelOffsetMode.Half;
+        g.SmoothingMode = SmoothingMode.None;
+        g.CompositingMode = CompositingMode.SourceCopy;
+
+        using var attributes = new ImageAttributes();
+        attributes.SetWrapMode(WrapMode.TileFlipXY); // évite le liseré de demi-pixel en bord d'image
+
+        var corners = new[]
+        {
+            new PointF(dest.Left, dest.Top),
+            new PointF(dest.Right, dest.Top),
+            new PointF(dest.Left, dest.Bottom),
+        };
+        g.DrawImage(image, corners, new RectangleF(0, 0, image.Width, image.Height), GraphicsUnit.Pixel, attributes);
+
+        e.HasMorePages = false;
+    }
 
     /// <summary>
     /// Rectangle de destination (centièmes de pouce, origine = coin de la zone imprimable) d'une image de page entière :
     /// taille physique exacte, décalée de (-X, -Y) de la zone imprimable pour que l'image soit calée sur le coin du papier,
-    /// alignée sur les points de l'imprimante.
+    /// alignée sur les points de l'imprimante. L'image n'est JAMAIS réduite : ce qui dépasse de la zone imprimable est
+    /// rogné par le pilote (comme dans P-touch, où les positions sont données depuis le coin du papier).
     /// </summary>
     internal static RectangleF ComputeFullPageDestination(
         int imageWidthPx, int imageHeightPx, float imageDpiX, float imageDpiY,
         RectangleF printableAreaUnits, float deviceDpiX, float deviceDpiY)
-        => throw new NotImplementedException();
+    {
+        if (!float.IsFinite(imageDpiX) || imageDpiX <= 0)
+        {
+            imageDpiX = 300f;
+        }
+
+        if (!float.IsFinite(imageDpiY) || imageDpiY <= 0)
+        {
+            imageDpiY = imageDpiX;
+        }
+
+        double w = imageWidthPx * 100.0 / imageDpiX;
+        double h = imageHeightPx * 100.0 / imageDpiY;
+
+        // Décalage de la zone imprimable par rapport au coin du papier (une valeur illisible ou négative ne décale pas).
+        double offsetX = float.IsFinite(printableAreaUnits.X) ? Math.Max(0.0, printableAreaUnits.X) : 0.0;
+        double offsetY = float.IsFinite(printableAreaUnits.Y) ? Math.Max(0.0, printableAreaUnits.Y) : 0.0;
+        double x = -offsetX;
+        double y = -offsetY;
+
+        if (float.IsFinite(deviceDpiX) && deviceDpiX > 0)
+        {
+            w = Math.Max(1.0, Math.Round(w * deviceDpiX / 100.0)) * 100.0 / deviceDpiX;
+            x = Math.Round(x * deviceDpiX / 100.0) * 100.0 / deviceDpiX;
+        }
+
+        if (float.IsFinite(deviceDpiY) && deviceDpiY > 0)
+        {
+            h = Math.Max(1.0, Math.Round(h * deviceDpiY / 100.0)) * 100.0 / deviceDpiY;
+            y = Math.Round(y * deviceDpiY / 100.0) * 100.0 / deviceDpiY;
+        }
+
+        // « + 0.0 » : un -0 arrondi devient +0.
+        return new RectangleF((float)(x + 0.0), (float)(y + 0.0), (float)w, (float)h);
+    }
+
+    /// <summary>
+    /// Transforme n'importe quelle exception d'impression en <see cref="InvalidOperationException"/> au message français
+    /// (l'exception d'origine est journalisée et jointe). Ne lève jamais.
+    /// </summary>
+    internal static InvalidOperationException ToFriendlyException(Exception ex, string printer, string context)
+    {
+        switch (ex)
+        {
+            case PrintFailure failure:
+                Log.Error(context + " : " + failure.Message, failure.InnerException);
+                return new InvalidOperationException(failure.Message, failure.InnerException ?? failure);
+            case InvalidPrinterException:
+                Log.Error(context + " : imprimante invalide « " + printer + " ».", ex);
+                return new InvalidOperationException(
+                    "L'imprimante « " + printer + " » est introuvable ou indisponible. Vérifiez qu'elle est branchée et allumée, "
+                    + "puis sélectionnez-la à nouveau dans la liste.", ex);
+            case Win32Exception win32:
+                Log.Error(context + " : erreur Windows " + win32.NativeErrorCode + ".", ex);
+                return new InvalidOperationException(
+                    "Windows a signalé une erreur d'impression (" + ex.Message + "). Vérifiez que l'imprimante « " + printer
+                    + " » est allumée, connectée et sans erreur (rouleau, capot).", ex);
+            default:
+                Log.Error(context + " : échec inattendu.", ex);
+                return new InvalidOperationException(
+                    "L'impression a échoué (" + ex.Message + "). Utilisez « Copier le diagnostic d'impression » "
+                    + "dans le menu de l'icône pour obtenir le détail.", ex);
+        }
+    }
 
     // ------------------------------------------------------------------ géométrie (pure)
 
@@ -1202,6 +1710,22 @@ public static class LabelPrinter
                 ? "Format qui serait utilisé : AUCUN (l'impression serait refusée)"
                 : "Format qui serait utilisé : " + selected.Value.Candidate.Label + ", page " + selected.Value.PageHeightUnits
                   + "/100 pouce (" + UnitsToMm(selected.Value.PageHeightUnits).ToString("0.0", CultureInfo.InvariantCulture) + " mm de long)");
+        });
+
+        // Étiquettes en série : papier qui serait préparé pour la longueur BatchLabelLengthMm (au mieux, sans rien imprimer).
+        sb.AppendLine();
+        Guard(sb, "étiquettes en série", () =>
+        {
+            try
+            {
+                FixedPaper fixedPaper = PrepareFixedPaperCore(printerName, s, s.BatchLabelLengthMm, writeLog: false);
+                sb.AppendLine("Étiquettes en série (" + s.BatchLabelLengthMm.ToString(CultureInfo.InvariantCulture) + " mm demandés) : "
+                              + fixedPaper.Description);
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("Étiquettes en série : papier impossible à préparer - " + ex.Message);
+            }
         });
     }
 

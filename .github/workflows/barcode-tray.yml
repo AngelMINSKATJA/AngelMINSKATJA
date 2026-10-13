@@ -164,6 +164,58 @@ jobs:
           Write-Host "Auto-test réussi."
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Auto-test --selftest : OK (PNG ${width} x ${height} px)."
 
+      - name: Auto-test de l'étiquette en série (--selftest-label)
+        run: |
+          $exe = Join-Path (Get-Location).Path 'publish\BarcodeTray.exe'
+          $png = Join-Path (Get-Location).Path 'selftest-label-out.png'
+          if (Test-Path $png) { Remove-Item $png -Force }
+
+          # Même principe que --selftest : application Windows sans console, attente bornée.
+          $p = Start-Process -FilePath $exe -ArgumentList @('--selftest-label', ('"{0}"' -f $png)) -PassThru
+          $null = $p.Handle
+          if (-not $p.WaitForExit(120000)) {
+            try { $p.Kill() } catch { }
+            Write-Host "::error title=Auto-test étiquette::BarcodeTray.exe --selftest-label n'a pas terminé en 120 s."
+            exit 1
+          }
+          $p.WaitForExit()
+          Write-Host "Code de sortie : $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) {
+            Write-Host "::error title=Auto-test étiquette::BarcodeTray.exe --selftest-label a échoué (code $($p.ExitCode))."
+            exit 1
+          }
+
+          if (-not (Test-Path $png)) {
+            Write-Host "::error title=Auto-test étiquette::le fichier PNG n'a pas été créé."
+            exit 1
+          }
+          $bytes = [System.IO.File]::ReadAllBytes($png)
+          Write-Host "PNG : $($bytes.Length) octets"
+          if ($bytes.Length -lt 1000) {
+            Write-Host "::error title=Auto-test étiquette::PNG trop petit ($($bytes.Length) octets) pour une étiquette avec du texte."
+            exit 1
+          }
+          $signature = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+          for ($i = 0; $i -lt 8; $i++) {
+            if ($bytes[$i] -ne $signature[$i]) {
+              Write-Host "::error title=Auto-test étiquette::signature PNG invalide."
+              exit 1
+            }
+          }
+          # Chunk IHDR : largeur et hauteur (entiers 32 bits, gros-boutiste) aux positions 16 et 20.
+          $width = ([int]$bytes[16] -shl 24) -bor ([int]$bytes[17] -shl 16) -bor ([int]$bytes[18] -shl 8) -bor [int]$bytes[19]
+          $height = ([int]$bytes[20] -shl 24) -bor ([int]$bytes[21] -shl 16) -bor ([int]$bytes[22] -shl 8) -bor [int]$bytes[23]
+          Write-Host "Dimensions : ${width} x ${height} px"
+          # Page de 62 x 40 mm à 300 dpi = 732 x 471 points, à 5 % près.
+          $expectedWidth = 732
+          $expectedHeight = 471
+          if ([math]::Abs($width - $expectedWidth) -gt ($expectedWidth * 0.05) -or [math]::Abs($height - $expectedHeight) -gt ($expectedHeight * 0.05)) {
+            Write-Host "::error title=Auto-test étiquette::dimensions inattendues (${width} x ${height} px au lieu de ${expectedWidth} x ${expectedHeight} px, 5 % de tolérance)."
+            exit 1
+          }
+          Write-Host "Auto-test de l'étiquette réussi."
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Auto-test --selftest-label : OK (PNG ${width} x ${height} px, étiquette 62 x 40 mm)."
+
       - name: Lancement de contrôle en mode zone de notification (--tray, 6 s)
         continue-on-error: true
         run: |
@@ -239,13 +291,14 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Archiver les éléments de diagnostic (PNG de l'auto-test, journal, résultats de tests)
+      - name: Archiver les éléments de diagnostic (PNG des auto-tests, journal, résultats de tests)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: BarcodeTray-ci-diagnostics
           path: |
             BarcodeTray/selftest-out.png
+            BarcodeTray/selftest-label-out.png
             BarcodeTray/ci-barcodetray.log
             BarcodeTray/ci-barcodetray-before-tray.log
             BarcodeTray/TestResults/*.trx

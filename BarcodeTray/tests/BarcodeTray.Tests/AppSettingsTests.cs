@@ -477,5 +477,476 @@ public class AppSettingsTests
         Assert.Equal(expected.PaperName, actual.PaperName);
         Assert.Equal(expected.CheckPrinterStatus, actual.CheckPrinterStatus);
         Assert.Equal(expected.CheckPaper, actual.CheckPaper);
+        Assert.Equal(expected.BatchLabelLengthMm, actual.BatchLabelLengthMm);
+        Assert.Equal(expected.BatchFontName, actual.BatchFontName);
+        Assert.Equal(expected.BatchTypeFontPt, actual.BatchTypeFontPt);
+        Assert.Equal(expected.BatchPlanFontPt, actual.BatchPlanFontPt);
+        Assert.Equal(expected.BatchTypeLeftMm, actual.BatchTypeLeftMm);
+        Assert.Equal(expected.BatchTypeBaselineMm, actual.BatchTypeBaselineMm);
+        Assert.Equal(expected.BatchPlanBaselineMm, actual.BatchPlanBaselineMm);
+        Assert.Equal(expected.BatchConfirm, actual.BatchConfirm);
+    }
+
+    private static void AssertBatchUsable(AppSettings s)
+    {
+        Assert.InRange(s.BatchLabelLengthMm, 10, 300);
+        Assert.False(string.IsNullOrWhiteSpace(s.BatchFontName));
+        foreach (float value in new[]
+                 {
+                     s.BatchTypeFontPt, s.BatchPlanFontPt, s.BatchTypeLeftMm, s.BatchTypeBaselineMm, s.BatchPlanBaselineMm,
+                 })
+        {
+            Assert.False(float.IsNaN(value) || float.IsInfinity(value), "valeur non finie : " + value);
+        }
+
+        Assert.InRange(s.BatchTypeFontPt, 4f, 200f);
+        Assert.InRange(s.BatchPlanFontPt, 4f, 300f);
+        Assert.InRange(s.BatchTypeLeftMm, 0f, 60f);
+        Assert.InRange(s.BatchTypeBaselineMm, 1f, 300f);
+        Assert.InRange(s.BatchPlanBaselineMm, 1f, 300f);
+    }
+
+    private static readonly string[] BatchKeys =
+    {
+        "BatchLabelLengthMm", "BatchFontName", "BatchTypeFontPt", "BatchPlanFontPt", "BatchTypeLeftMm",
+        "BatchTypeBaselineMm", "BatchPlanBaselineMm", "BatchConfirm",
+    };
+
+    // ---------------------------------------------------------------- étiquettes en série (clés Batch*)
+
+    [Fact]
+    public void BatchDefaults_MatchTheSpecification()
+    {
+        var s = new AppSettings();
+
+        Assert.Equal(40, s.BatchLabelLengthMm);
+        Assert.Equal("Arial", s.BatchFontName);
+        Assert.Equal(23f, s.BatchTypeFontPt);
+        Assert.Equal(61f, s.BatchPlanFontPt);
+        Assert.Equal(1.9f, s.BatchTypeLeftMm);
+        Assert.Equal(10.6f, s.BatchTypeBaselineMm);
+        Assert.Equal(32.0f, s.BatchPlanBaselineMm);
+        Assert.True(s.BatchConfirm);
+    }
+
+    [Fact]
+    public void BatchDefaults_SurviveValidate_Unchanged()
+    {
+        var s = new AppSettings();
+
+        s.Validate();
+        s.Validate();
+
+        AssertEqualSettings(new AppSettings(), s);
+    }
+
+    [Fact]
+    public void BatchKeys_SaveThenLoad_RoundTripsEveryValue()
+    {
+        using var sandbox = new SettingsSandbox();
+        var original = new AppSettings
+        {
+            FirstRunDone = true,
+            BatchLabelLengthMm = 29,
+            BatchFontName = "Segoe UI",
+            BatchTypeFontPt = 24.5f,
+            BatchPlanFontPt = 62.25f,
+            BatchTypeLeftMm = 2.5f,
+            BatchTypeBaselineMm = 11.2f,
+            BatchPlanBaselineMm = 33.75f,
+            BatchConfirm = false,
+        };
+
+        original.Save();
+
+        AppSettings loaded = AppSettings.Load();
+        AssertEqualSettings(original, loaded);
+        Assert.False(loaded.BatchConfirm);
+        Assert.Equal(62.25f, loaded.BatchPlanFontPt);
+    }
+
+    [Fact]
+    public void BatchKeys_AreWrittenToTheJsonFile_UnderTheirDocumentedNames()
+    {
+        using var sandbox = new SettingsSandbox();
+        sandbox.DeleteSettingsFile();
+
+        new AppSettings().Save();
+
+        using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(sandbox.SettingsPath, Encoding.UTF8));
+        string[] keys = doc.RootElement.EnumerateObject().Select(p => p.Name).ToArray();
+        foreach (string expected in BatchKeys)
+        {
+            Assert.Contains(expected, keys);
+        }
+
+        Assert.Equal(40, doc.RootElement.GetProperty("BatchLabelLengthMm").GetInt32());
+        Assert.Equal("Arial", doc.RootElement.GetProperty("BatchFontName").GetString());
+        Assert.Equal(23.0, doc.RootElement.GetProperty("BatchTypeFontPt").GetDouble(), 3);
+        Assert.Equal(61.0, doc.RootElement.GetProperty("BatchPlanFontPt").GetDouble(), 3);
+        Assert.Equal(1.9, doc.RootElement.GetProperty("BatchTypeLeftMm").GetDouble(), 3);
+        Assert.Equal(10.6, doc.RootElement.GetProperty("BatchTypeBaselineMm").GetDouble(), 3);
+        Assert.Equal(32.0, doc.RootElement.GetProperty("BatchPlanBaselineMm").GetDouble(), 3);
+        Assert.True(doc.RootElement.GetProperty("BatchConfirm").GetBoolean());
+    }
+
+    [Fact]
+    public void Load_SettingsFileWrittenByThePreviousVersion_GetsBatchDefaults_AndKeepsItsOwnValues()
+    {
+        using var sandbox = new SettingsSandbox();
+        // Fichier de la version précédente : aucune clé Batch*.
+        sandbox.WriteRaw(
+            "{\n"
+            + "  \"PrinterName\": \"Brother QL-800 (Copie 1)\",\n"
+            + "  \"FirstRunDone\": true,\n"
+            + "  \"Dpi\": 300,\n"
+            + "  \"ModulePx\": 3,\n"
+            + "  \"MaxWidthPx\": 696,\n"
+            + "  \"BarHeightPx\": 150,\n"
+            + "  \"FontName\": \"Arial\",\n"
+            + "  \"FontSizePt\": 11,\n"
+            + "  \"LabelWidthMm\": 62,\n"
+            + "  \"MinLabelLengthMm\": 15,\n"
+            + "  \"PaperName\": null,\n"
+            + "  \"CheckPrinterStatus\": true,\n"
+            + "  \"CheckPaper\": true\n"
+            + "}\n");
+
+        AppSettings loaded = AppSettings.Load();
+
+        Assert.False(loaded.LoadFailed);
+        Assert.True(loaded.FirstRunDone);
+        Assert.Equal("Brother QL-800 (Copie 1)", loaded.PrinterName);
+        Assert.Equal(300, loaded.Dpi);
+        Assert.Equal(40, loaded.BatchLabelLengthMm);
+        Assert.Equal("Arial", loaded.BatchFontName);
+        Assert.Equal(23f, loaded.BatchTypeFontPt);
+        Assert.Equal(61f, loaded.BatchPlanFontPt);
+        Assert.Equal(1.9f, loaded.BatchTypeLeftMm);
+        Assert.Equal(10.6f, loaded.BatchTypeBaselineMm);
+        Assert.Equal(32.0f, loaded.BatchPlanBaselineMm);
+        Assert.True(loaded.BatchConfirm);
+    }
+
+    [Fact]
+    public void Save_AfterLoadingAFileWithoutBatchKeys_AddsThem_WithoutTouchingTheOtherValues()
+    {
+        using var sandbox = new SettingsSandbox();
+        sandbox.WriteRaw("{ \"PrinterName\": \"Ma QL-800\", \"FirstRunDone\": true, \"Dpi\": 203, \"PaperName\": \"62mm\" }");
+        AppSettings loaded = AppSettings.Load();
+
+        loaded.Save();
+
+        using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(sandbox.SettingsPath, Encoding.UTF8));
+        string[] keys = doc.RootElement.EnumerateObject().Select(p => p.Name).ToArray();
+        foreach (string expected in BatchKeys)
+        {
+            Assert.Contains(expected, keys);
+        }
+
+        AppSettings reloaded = AppSettings.Load();
+        Assert.Equal("Ma QL-800", reloaded.PrinterName);
+        Assert.Equal(203, reloaded.Dpi);
+        Assert.Equal("62mm", reloaded.PaperName);
+        Assert.Equal(40, reloaded.BatchLabelLengthMm);
+        Assert.False(reloaded.LoadFailed);
+    }
+
+    [Fact]
+    public void Load_OnlyBatchKeysPresent_AppliesThemAndKeepsTheRestAtDefaults()
+    {
+        using var sandbox = new SettingsSandbox();
+        sandbox.WriteRaw("{ \"BatchLabelLengthMm\": 50, \"BatchPlanFontPt\": 55.5, \"BatchConfirm\": false }");
+
+        AppSettings loaded = AppSettings.Load();
+
+        Assert.False(loaded.LoadFailed);
+        Assert.Equal(50, loaded.BatchLabelLengthMm);
+        Assert.Equal(55.5f, loaded.BatchPlanFontPt);
+        Assert.False(loaded.BatchConfirm);
+        Assert.Equal(23f, loaded.BatchTypeFontPt);   // le reste garde ses valeurs par défaut
+        Assert.Equal(300, loaded.Dpi);
+    }
+
+    [Fact]
+    public void Load_BatchKeys_AreCaseInsensitive_AndAcceptNumbersWrittenAsText()
+    {
+        using var sandbox = new SettingsSandbox();
+        sandbox.WriteRaw("{ \"batchlabellengthmm\": \"45\", \"BATCHTYPEFONTPT\": \"20.5\", \"batchFontName\": \"Calibri\" }");
+
+        AppSettings loaded = AppSettings.Load();
+
+        Assert.False(loaded.LoadFailed);
+        Assert.Equal(45, loaded.BatchLabelLengthMm);
+        Assert.Equal(20.5f, loaded.BatchTypeFontPt);
+        Assert.Equal("Calibri", loaded.BatchFontName);
+    }
+
+    [Theory]
+    [InlineData(-5, 10)]
+    [InlineData(0, 10)]
+    [InlineData(9, 10)]
+    [InlineData(10, 10)]
+    [InlineData(40, 40)]
+    [InlineData(62, 62)]
+    [InlineData(300, 300)]
+    [InlineData(301, 300)]
+    [InlineData(100000, 300)]
+    [InlineData(int.MinValue, 10)]
+    [InlineData(int.MaxValue, 300)]
+    public void Validate_ClampsBatchLabelLengthMm(int input, int expected)
+    {
+        var s = new AppSettings { BatchLabelLengthMm = input };
+
+        s.Validate();
+
+        Assert.Equal(expected, s.BatchLabelLengthMm);
+    }
+
+    [Theory]
+    [InlineData(-1f, 4f)]
+    [InlineData(0f, 4f)]
+    [InlineData(3.9f, 4f)]
+    [InlineData(4f, 4f)]
+    [InlineData(23f, 23f)]
+    [InlineData(200f, 200f)]
+    [InlineData(200.1f, 200f)]
+    [InlineData(100000f, 200f)]
+    public void Validate_ClampsBatchTypeFontPt(float input, float expected)
+    {
+        var s = new AppSettings { BatchTypeFontPt = input };
+
+        s.Validate();
+
+        Assert.Equal(expected, s.BatchTypeFontPt);
+    }
+
+    [Theory]
+    [InlineData(-1f, 4f)]
+    [InlineData(0f, 4f)]
+    [InlineData(4f, 4f)]
+    [InlineData(61f, 61f)]
+    [InlineData(300f, 300f)]
+    [InlineData(300.5f, 300f)]
+    [InlineData(100000f, 300f)]
+    public void Validate_ClampsBatchPlanFontPt(float input, float expected)
+    {
+        var s = new AppSettings { BatchPlanFontPt = input };
+
+        s.Validate();
+
+        Assert.Equal(expected, s.BatchPlanFontPt);
+    }
+
+    [Theory]
+    [InlineData(-3f, 0f)]
+    [InlineData(0f, 0f)]
+    [InlineData(1.9f, 1.9f)]
+    [InlineData(60f, 60f)]
+    [InlineData(60.5f, 60f)]
+    [InlineData(5000f, 60f)]
+    public void Validate_ClampsBatchTypeLeftMm(float input, float expected)
+    {
+        var s = new AppSettings { BatchTypeLeftMm = input };
+
+        s.Validate();
+
+        Assert.Equal(expected, s.BatchTypeLeftMm);
+    }
+
+    [Theory]
+    [InlineData(-3f, 1f)]
+    [InlineData(0f, 1f)]
+    [InlineData(1f, 1f)]
+    [InlineData(10.6f, 10.6f)]
+    [InlineData(300f, 300f)]
+    [InlineData(301f, 300f)]
+    [InlineData(1e9f, 300f)]
+    public void Validate_ClampsBatchBaselines(float input, float expected)
+    {
+        var s = new AppSettings { BatchTypeBaselineMm = input, BatchPlanBaselineMm = input };
+
+        s.Validate();
+
+        Assert.Equal(expected, s.BatchTypeBaselineMm);
+        Assert.Equal(expected, s.BatchPlanBaselineMm);
+    }
+
+    [Fact]
+    public void Validate_NonFiniteBatchValues_FallBackToTheDefaults()
+    {
+        foreach (float bad in new[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity })
+        {
+            var s = new AppSettings
+            {
+                BatchTypeFontPt = bad,
+                BatchPlanFontPt = bad,
+                BatchTypeLeftMm = bad,
+                BatchTypeBaselineMm = bad,
+                BatchPlanBaselineMm = bad,
+            };
+
+            s.Validate();
+
+            AssertBatchUsable(s);
+            Assert.Equal(23f, s.BatchTypeFontPt);
+            Assert.Equal(61f, s.BatchPlanFontPt);
+            Assert.Equal(1.9f, s.BatchTypeLeftMm);
+            Assert.Equal(10.6f, s.BatchTypeBaselineMm);
+            Assert.Equal(32.0f, s.BatchPlanBaselineMm);
+        }
+    }
+
+    [Fact]
+    public void Save_WithNonFiniteBatchValues_WritesValidJson_AndReloadsTheDefaults()
+    {
+        using var sandbox = new SettingsSandbox();
+        var s = new AppSettings
+        {
+            FirstRunDone = true,
+            BatchPlanFontPt = float.NaN,
+            BatchTypeFontPt = float.PositiveInfinity,
+            BatchPlanBaselineMm = float.NegativeInfinity,
+        };
+
+        s.Save();   // NaN / Infinity ne sont pas du JSON valide : Validate les remplace avant l'écriture
+
+        Assert.True(File.Exists(sandbox.SettingsPath));
+        using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(sandbox.SettingsPath, Encoding.UTF8));
+        Assert.Equal(JsonValueKind.Object, doc.RootElement.ValueKind);
+        AppSettings loaded = AppSettings.Load();
+        Assert.False(loaded.LoadFailed);
+        Assert.Equal(61f, loaded.BatchPlanFontPt);
+        Assert.Equal(23f, loaded.BatchTypeFontPt);
+        Assert.Equal(32.0f, loaded.BatchPlanBaselineMm);
+    }
+
+    [Theory]
+    [InlineData("\"NaN\"")]
+    [InlineData("\"Infinity\"")]
+    [InlineData("\"-Infinity\"")]
+    [InlineData("\"abc\"")]
+    [InlineData("null")]
+    [InlineData("[1]")]
+    [InlineData("{}")]
+    [InlineData("1e999")]
+    [InlineData("-1e999")]
+    public void Load_NonNumericOrNonFiniteBatchValueInTheFile_NeverThrows_AndStaysUsable(string literal)
+    {
+        using var sandbox = new SettingsSandbox();
+        sandbox.WriteRaw("{ \"Dpi\": 203, \"BatchTypeFontPt\": " + literal + ", \"BatchPlanFontPt\": " + literal
+                         + ", \"BatchTypeLeftMm\": " + literal + ", \"BatchTypeBaselineMm\": " + literal
+                         + ", \"BatchPlanBaselineMm\": " + literal + " }");
+
+        AppSettings loaded = AppSettings.Load();
+
+        AssertBatchUsable(loaded);
+        Assert.Equal(203, loaded.Dpi);   // une valeur illisible ne fait pas perdre les autres réglages
+    }
+
+    [Fact]
+    public void Load_AbsurdBatchValuesInTheFile_AreClamped()
+    {
+        using var sandbox = new SettingsSandbox();
+        sandbox.WriteRaw("{ \"BatchLabelLengthMm\": 99999, \"BatchTypeFontPt\": -5, \"BatchPlanFontPt\": 100000, "
+                         + "\"BatchTypeLeftMm\": -10, \"BatchTypeBaselineMm\": 0, \"BatchPlanBaselineMm\": 1e9, \"BatchFontName\": \"   \" }");
+
+        AppSettings loaded = AppSettings.Load();
+
+        AssertBatchUsable(loaded);
+        Assert.Equal(300, loaded.BatchLabelLengthMm);
+        Assert.Equal(4f, loaded.BatchTypeFontPt);
+        Assert.Equal(300f, loaded.BatchPlanFontPt);
+        Assert.Equal(0f, loaded.BatchTypeLeftMm);
+        Assert.Equal(1f, loaded.BatchTypeBaselineMm);
+        Assert.Equal(300f, loaded.BatchPlanBaselineMm);
+        Assert.Equal("Arial", loaded.BatchFontName);
+    }
+
+    [Fact]
+    public void Load_WrongTypeForBatchConfirm_KeepsTheDefault_AndTheOtherSettings()
+    {
+        using var sandbox = new SettingsSandbox();
+        sandbox.WriteRaw("{ \"BatchConfirm\": \"oui\", \"BatchLabelLengthMm\": 55, \"PrinterName\": \"QL\" }");
+
+        AppSettings loaded = AppSettings.Load();
+
+        Assert.True(loaded.LoadFailed);          // valeur illisible signalée, comme pour les autres clés
+        Assert.True(loaded.BatchConfirm);        // valeur par défaut conservée
+        Assert.Equal(55, loaded.BatchLabelLengthMm);
+        Assert.Equal("QL", loaded.PrinterName);
+    }
+
+    [Theory]
+    [InlineData(null, "Arial")]
+    [InlineData("", "Arial")]
+    [InlineData("   ", "Arial")]
+    [InlineData("Arial", "Arial")]
+    [InlineData("  Calibri  ", "Calibri")]
+    [InlineData("Segoe UI Semibold", "Segoe UI Semibold")]
+    public void Validate_BatchFontName_IsTrimmed_AndNeverBlank(string? input, string expected)
+    {
+        var s = new AppSettings { BatchFontName = input! };
+
+        s.Validate();
+
+        Assert.Equal(expected, s.BatchFontName);
+    }
+
+    [Fact]
+    public void Validate_KeepsReasonableCustomBatchValues()
+    {
+        var s = new AppSettings
+        {
+            BatchLabelLengthMm = 29,
+            BatchFontName = "Calibri",
+            BatchTypeFontPt = 18f,
+            BatchPlanFontPt = 48f,
+            BatchTypeLeftMm = 3f,
+            BatchTypeBaselineMm = 9f,
+            BatchPlanBaselineMm = 24.5f,
+            BatchConfirm = false,
+        };
+
+        s.Validate();
+
+        Assert.Equal(29, s.BatchLabelLengthMm);
+        Assert.Equal("Calibri", s.BatchFontName);
+        Assert.Equal(18f, s.BatchTypeFontPt);
+        Assert.Equal(48f, s.BatchPlanFontPt);
+        Assert.Equal(3f, s.BatchTypeLeftMm);
+        Assert.Equal(9f, s.BatchTypeBaselineMm);
+        Assert.Equal(24.5f, s.BatchPlanBaselineMm);
+        Assert.False(s.BatchConfirm);
+    }
+
+    [Fact]
+    public void Clone_CopiesTheBatchKeys_AndIsIndependent()
+    {
+        var original = new AppSettings { BatchLabelLengthMm = 33, BatchFontName = "Calibri", BatchPlanFontPt = 50f, BatchConfirm = false };
+
+        AppSettings copy = original.Clone();
+        copy.BatchLabelLengthMm = 99;
+        copy.BatchFontName = "Verdana";
+        copy.BatchConfirm = true;
+
+        Assert.Equal(33, original.BatchLabelLengthMm);
+        Assert.Equal("Calibri", original.BatchFontName);
+        Assert.False(original.BatchConfirm);
+        Assert.Equal(50f, original.BatchPlanFontPt);
+        Assert.Equal(50f, copy.BatchPlanFontPt);
+    }
+
+    [Fact]
+    public void BatchKeys_AreSettableProperties_SoTheJsonLoaderKnowsThem()
+    {
+        // Le chargeur ne connaît que les propriétés publiques lisibles ET modifiables : une clé Batch* privée ou en
+        // lecture seule serait silencieusement ignorée dans settings.json.
+        foreach (string key in BatchKeys)
+        {
+            System.Reflection.PropertyInfo? property = typeof(AppSettings).GetProperty(key);
+            Assert.NotNull(property);
+            Assert.True(property!.CanRead && property.CanWrite, key);
+        }
     }
 }
