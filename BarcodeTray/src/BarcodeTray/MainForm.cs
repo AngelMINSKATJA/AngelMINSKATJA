@@ -43,6 +43,7 @@ internal sealed class MainForm : Form
     private readonly CheckBox _chkStartup = new();
     private readonly Label _lblStatus = new();
     private readonly LinkLabel _lnkBatch = new();
+    private readonly LinkLabel _lnkBarcodeBatch = new();
     private readonly ToolTip _toolTip = new();
 
     private Icon? _formIcon;
@@ -169,6 +170,9 @@ internal sealed class MainForm : Form
     /// <summary>Déclenché par le lien « Étiquettes en série… » : la fenêtre des étiquettes en série doit s'ouvrir.</summary>
     public event EventHandler? BatchRequested;
 
+    /// <summary>Déclenché par le lien « Codes-barres en série… » : la fenêtre des codes-barres en série (liste) doit s'ouvrir.</summary>
+    public event EventHandler? BarcodeBatchRequested;
+
     // ------------------------------------------------------------------ construction
 
     private void BuildUi()
@@ -252,6 +256,19 @@ internal sealed class MainForm : Form
         _lnkBatch.TabIndex = 5;
         _lnkBatch.AccessibleName = "Étiquettes en série";
 
+        // Second lien, sur la même ligne, à droite : les codes-barres d'une liste (Excel, Word, Bloc-notes, fichier).
+        // Les deux liens sont des enfants directs du tableau (même repère que le message d'état).
+        _lnkBarcodeBatch.Text = "Codes-barres en série…";
+        _lnkBarcodeBatch.AutoSize = true;
+        _lnkBarcodeBatch.Anchor = AnchorStyles.Right;
+        _lnkBarcodeBatch.Margin = new Padding(3, 6, 3, 3);
+        _lnkBarcodeBatch.TabIndex = 6;
+        _lnkBarcodeBatch.AccessibleName = "Codes-barres en série";
+
+        // Les boutons restent alignés à droite, comme le second lien, dans la colonne que celui-ci élargit un peu.
+        _btnGenerate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _btnPrint.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+
         var table = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -282,7 +299,7 @@ internal sealed class MainForm : Form
         table.Controls.Add(_lblStatus, 0, 5);
         table.SetColumnSpan(_lblStatus, 2);
         table.Controls.Add(_lnkBatch, 0, 6);
-        table.SetColumnSpan(_lnkBatch, 2);
+        table.Controls.Add(_lnkBarcodeBatch, 1, 6);
 
         Controls.Add(table);
 
@@ -291,6 +308,7 @@ internal sealed class MainForm : Form
         _toolTip.SetToolTip(_btnGenerate, "Copie le code-barres (image) dans le presse-papier : collez-le avec Ctrl+V dans Word ou Excel.");
         _toolTip.SetToolTip(_btnPrint, "Imprime l'étiquette tout de suite sur l'imprimante choisie.");
         _toolTip.SetToolTip(_lnkBatch, "Imprimer en série des étiquettes de plans de châssis à partir d'un tableau Excel.");
+        _toolTip.SetToolTip(_lnkBarcodeBatch, "Générer et imprimer plusieurs codes-barres d'un coup à partir d'une liste (Excel, Word, Bloc-notes, fichier).");
 
         _btnGenerate.Click += OnGenerateClick;
         _btnPrint.Click += OnPrintClick;
@@ -300,6 +318,7 @@ internal sealed class MainForm : Form
         _cmbPrinter.SelectedIndexChanged += OnPrinterSelectionChanged;
         _chkStartup.CheckedChanged += OnStartupCheckedChanged;
         _lnkBatch.LinkClicked += OnBatchLinkClicked;
+        _lnkBarcodeBatch.LinkClicked += OnBarcodeBatchLinkClicked;
 
         ResumeLayout(false);
         PerformLayout();
@@ -348,6 +367,7 @@ internal sealed class MainForm : Form
     {
         if (disposing)
         {
+            PrintGate.Release(this);
             _toolTip.Dispose();
         }
 
@@ -452,6 +472,14 @@ internal sealed class MainForm : Form
                 return;
             }
 
+            // Une seule fenêtre à la fois envoie des travaux à cette imprimante (une série en cours, ou un envoi resté sans réponse
+            // dans une autre fenêtre, ferait mélanger ou doubler les étiquettes).
+            if (!PrintGate.TryAcquire(printer, this, AppTitle, out string? busyWindow))
+            {
+                SetStatus(PrintGate.BusyMessage(printer, busyWindow), StatusKind.Warning);
+                return;
+            }
+
             _printing = true;
             SetBusy(true);
             busySet = true;
@@ -510,6 +538,11 @@ internal sealed class MainForm : Form
         {
             bitmap?.Dispose();
             _printing = false;
+            if (!_printPending)
+            {
+                PrintGate.Release(this); // un envoi resté sans réponse garde le verrou jusqu'à sa fin (voir OnLatePrintUiUpdate)
+            }
+
             if (busySet)
             {
                 SetBusy(false);
@@ -562,6 +595,11 @@ internal sealed class MainForm : Form
     private void OnLatePrintUiUpdate(string printer, Exception? error)
     {
         _printPending = false;
+        if (!_printing)
+        {
+            PrintGate.Release(this);
+        }
+
         if (IsDisposed)
         {
             return;
@@ -627,6 +665,19 @@ internal sealed class MainForm : Form
         {
             Log.Error("Ouverture des étiquettes en série impossible.", ex);
             SetStatus("Impossible d'ouvrir les étiquettes en série : " + ex.Message, StatusKind.Error);
+        }
+    }
+
+    private void OnBarcodeBatchLinkClicked(object? sender, LinkLabelLinkClickedEventArgs e)
+    {
+        try
+        {
+            BarcodeBatchRequested?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Ouverture des codes-barres en série impossible.", ex);
+            SetStatus("Impossible d'ouvrir les codes-barres en série : " + ex.Message, StatusKind.Error);
         }
     }
 

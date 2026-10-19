@@ -159,6 +159,12 @@ internal sealed class BatchForm : Form
                 {
                     UpdatePreview(); // l'imprimante choisie a pu changer (fenêtre principale) : l'aperçu suit
                 }
+
+                // Réglage « Confirmer avant d'imprimer » partagé avec la fenêtre des codes-barres en série : il a pu y être changé.
+                if (_chkConfirm.Checked != _settings.BatchConfirm)
+                {
+                    _chkConfirm.Checked = _settings.BatchConfirm;
+                }
             }
             catch (Exception ex)
             {
@@ -628,6 +634,7 @@ internal sealed class BatchForm : Form
         if (disposing)
         {
             _stopRequested = true;
+            PrintGate.Release(this);
             _toolTip.Dispose();
             Image? image = _preview.Image;
             _preview.Image = null;
@@ -1256,6 +1263,13 @@ internal sealed class BatchForm : Form
             }
         }
 
+        // Une seule fenêtre à la fois envoie des travaux à cette imprimante (sinon les étiquettes de deux séries se mélangent sur le rouleau).
+        if (!PrintGate.TryAcquire(printer, this, AppTitle, out string? busyWindow))
+        {
+            SetStatus(PrintGate.BusyMessage(printer, busyWindow), BatchTone.Warning);
+            return;
+        }
+
         int sheets = rows.Count * copies;
         _printing = true;
         _stopRequested = false;
@@ -1452,7 +1466,17 @@ internal sealed class BatchForm : Form
     private void EndBusy()
     {
         _printing = false;
+        ReleasePrintGate();
         UpdateButtons();
+    }
+
+    /// <summary>Rend le verrou d'impression commun aux fenêtres, sauf si un envoi sans réponse tourne encore (il le garde jusqu'à sa fin).</summary>
+    private void ReleasePrintGate()
+    {
+        if (!_printing && !_latePending)
+        {
+            PrintGate.Release(this);
+        }
     }
 
     /// <summary>
@@ -1504,6 +1528,7 @@ internal sealed class BatchForm : Form
     private void OnLateUiUpdate(string printer, Exception? error, bool labelSent)
     {
         _latePending = false;
+        ReleasePrintGate();
         if (IsDisposed)
         {
             return;

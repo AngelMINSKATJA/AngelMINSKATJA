@@ -27,6 +27,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly Control _marshal;
     private readonly MainForm _form;
     private BatchForm? _batchForm; // créée au premier besoin, réutilisée ensuite (fermer = masquer)
+    private BarcodeBatchForm? _barcodeBatchForm; // idem, pour les codes-barres en série (liste)
     private readonly NotifyIcon _notifyIcon;
     private readonly ContextMenuStrip _menu;
     private readonly ToolStripMenuItem _startupItem;
@@ -51,6 +52,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _form.Deactivate += (_, _) => _formDeactivatedTick = Environment.TickCount64;
         _form.FormClosed += OnFormClosed;
         _form.BatchRequested += (_, _) => Safe("Étiquettes en série", ShowBatchWindowCore);
+        _form.BarcodeBatchRequested += (_, _) => Safe("Codes-barres en série", ShowBarcodeBatchWindowCore);
 
         _menu = new ContextMenuStrip();
         var openItem = new ToolStripMenuItem("Ouvrir");
@@ -60,6 +62,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         var batchItem = new ToolStripMenuItem("Étiquettes en série (tableau Excel)…");
         batchItem.Click += (_, _) => Safe("Étiquettes en série", ShowBatchWindowCore);
+
+        var barcodeBatchItem = new ToolStripMenuItem("Codes-barres en série (liste)…");
+        barcodeBatchItem.Click += (_, _) => Safe("Codes-barres en série", ShowBarcodeBatchWindowCore);
 
         _startupItem = new ToolStripMenuItem("Lancer au démarrage de Windows");
         _startupItem.Click += (_, _) => Safe("Démarrage automatique", ToggleStartup);
@@ -72,6 +77,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _menu.Items.Add(openItem);
         _menu.Items.Add(batchItem);
+        _menu.Items.Add(barcodeBatchItem);
         _menu.Items.Add(_startupItem);
         _menu.Items.Add(diagItem);
         _menu.Items.Add(new ToolStripSeparator());
@@ -114,6 +120,45 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     /// <summary>La fenêtre « Étiquettes en série » (null tant qu'elle n'a pas été ouverte ; pour les tests).</summary>
     internal BatchForm? BatchWindow => _batchForm;
+
+    /// <summary>La fenêtre « Codes-barres en série » (null tant qu'elle n'a pas été ouverte ; pour les tests).</summary>
+    internal BarcodeBatchForm? BarcodeBatchWindow => _barcodeBatchForm;
+
+    /// <summary>
+    /// Affiche la fenêtre « Codes-barres en série » au premier plan (la crée si besoin). Peut être appelée depuis n'importe quel
+    /// thread : l'appel est renvoyé, sans attente, vers le thread d'interface.
+    /// </summary>
+    public void ShowBarcodeBatchWindow()
+    {
+        try
+        {
+            if (_disposed || _marshal.IsDisposed || !_marshal.IsHandleCreated)
+            {
+                return;
+            }
+
+            if (_marshal.InvokeRequired)
+            {
+                _marshal.BeginInvoke(new Action(ShowBarcodeBatchWindowCore));
+            }
+            else
+            {
+                ShowBarcodeBatchWindowCore();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // fermeture en cours
+        }
+        catch (InvalidOperationException)
+        {
+            // poignée détruite pendant l'appel : fermeture en cours
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Affichage des codes-barres en série demandé impossible.", ex);
+        }
+    }
 
     /// <summary>
     /// Affiche la fenêtre « Étiquettes en série » au premier plan (la crée si besoin). Peut être appelée depuis n'importe quel
@@ -309,6 +354,20 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
             try
             {
+                if (_barcodeBatchForm != null)
+                {
+                    _barcodeBatchForm.AllowExit = true;
+                    _barcodeBatchForm.Dispose();
+                    _barcodeBatchForm = null;
+                }
+            }
+            catch
+            {
+                // ignoré
+            }
+
+            try
+            {
                 _form.AllowExit = true;
                 _form.Dispose();
             }
@@ -361,6 +420,31 @@ internal sealed class TrayApplicationContext : ApplicationContext
         Safe("Afficher les étiquettes en série", _batchForm.ShowAndFocus);
     }
 
+    private void ShowBarcodeBatchWindowCore()
+    {
+        if (_disposed || _exiting)
+        {
+            return;
+        }
+
+        if (_barcodeBatchForm == null || _barcodeBatchForm.IsDisposed)
+        {
+            _barcodeBatchForm = new BarcodeBatchForm(_settings, s => s.Save());
+            _barcodeBatchForm.FormClosed += OnBarcodeBatchFormClosed;
+        }
+
+        Safe("Afficher les codes-barres en série", _barcodeBatchForm.ShowAndFocus);
+    }
+
+    /// <summary>La fenêtre des codes-barres en série a été fermée pour de vrai : elle sera recréée à la prochaine ouverture.</summary>
+    private void OnBarcodeBatchFormClosed(object? sender, FormClosedEventArgs e)
+    {
+        if (sender is BarcodeBatchForm closed && ReferenceEquals(closed, _barcodeBatchForm))
+        {
+            _barcodeBatchForm = null;
+        }
+    }
+
     /// <summary>La fenêtre des étiquettes en série a été fermée pour de vrai : elle sera recréée à la prochaine ouverture.</summary>
     private void OnBatchFormClosed(object? sender, FormClosedEventArgs e)
     {
@@ -370,16 +454,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
-    /// <summary>« Quitter » du menu : si une série d'étiquettes est en cours d'impression, demande confirmation.</summary>
+    /// <summary>« Quitter » du menu : si une série (étiquettes ou codes-barres) est en cours d'impression, demande confirmation.</summary>
     private void ExitFromMenu()
     {
         BatchForm? batch = _batchForm;
-        if (batch != null && !batch.IsDisposed && batch.IsPrinting)
+        BarcodeBatchForm? barcodeBatch = _barcodeBatchForm;
+        bool chassisPrinting = batch != null && !batch.IsDisposed && batch.IsPrinting;
+        bool barcodesPrinting = barcodeBatch != null && !barcodeBatch.IsDisposed && barcodeBatch.IsPrinting;
+        if (chassisPrinting || barcodesPrinting)
         {
             DialogResult answer = MessageBox.Show(
                 "Une série d'étiquettes est en cours d'impression.\n\nQuitter l'arrête tout de suite "
                 + "(l'étiquette en cours d'envoi peut ne pas sortir). Quitter quand même ?",
-                "Étiquettes en série",
+                chassisPrinting ? "Étiquettes en série" : "Codes-barres en série",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning,
                 MessageBoxDefaultButton.Button2);

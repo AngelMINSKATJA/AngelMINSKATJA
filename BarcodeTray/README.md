@@ -6,10 +6,11 @@ Petit utilitaire Windows qui vit dans la zone de notification (à côté de l'ho
 2. **Générer** copie un code-barres **Code 128** (avec le texte lisible dessous) dans le presse-papier : il suffit de coller (Ctrl+V) dans Word ou Excel,
 3. **Imprimer** envoie la même étiquette, sans aucune boîte de dialogue, sur une imprimante **Brother QL-800** (ruban 62 mm, coupe automatique),
 4. **Étiquettes en série** : on copie un tableau Excel (plans de châssis), le programme imprime **une étiquette par plan** (type de châssis en haut à gauche, n° de plan en grand dessous, 62 x 40 mm) en une seule fois, sans retaper ni valider chaque étiquette. Voir [Étiquettes en série](#étiquettes-en-série-plans-de-châssis).
+5. **Codes-barres en série** : on charge une **liste de textes** (colonne Excel, lignes Word ou Bloc-notes collées, ou fichier `.txt`, `.csv`, `.xlsx`, `.docx`), le programme affiche un tableau « texte du code / code-barres en image » et **Imprimer tous** envoie tous les codes-barres à l'imprimante, l'un après l'autre, en un seul clic. Voir [Codes-barres en série](#codes-barres-en-série-liste).
 
 Un seul fichier, **`BarcodeTray.exe`** : pas d'installation, pas de droits administrateur, pas besoin d'installer .NET (le programme embarque tout ce qu'il lui faut, y compris son propre .NET 8 ; le .NET Framework 4.8 du poste n'est pas utilisé). Le fichier fait environ 65 à 70 Mo, c'est normal. Il fonctionne sous **Windows 10 ou 11, en 64 bits** (Windows 7 n'est pas pris en charge).
 
-> **État des tests, en toute franchise** : à chaque modification, GitHub compile le programme et lance des tests automatiques (génération et relecture des codes-barres, presse-papier, réglages, démarrage automatique, choix du format de papier) ; **ne prenez que l'exécutable d'un lancement marqué d'une coche verte** (onglet *Actions*). En revanche, **la fenêtre « Étiquettes en série » n'a jamais été essayée sur un vrai poste Windows, ni avec une vraie Brother QL-800** (aspect de la fenêtre, longueur exacte et position du texte sur l'étiquette, comportement du pilote quand 90 étiquettes partent d'affilée) : les tests automatiques vérifient la lecture du tableau, le dessin de l'étiquette et le déroulement d'une série, pas le papier qui sort. La partie impression est la plus délicate (chaque pilote nomme ses formats de papier à sa façon). **Imprimez d'abord 2 ou 3 étiquettes** et comparez-les à celles de P-touch Editor avant de lancer toute la série. Si quelque chose ne va pas, voir [Si l'impression ne va pas](#si-limpression-ne-va-pas) : un réglage dans un petit fichier texte suffit en général.
+> **État des tests, en toute franchise** : à chaque modification, GitHub compile le programme et lance des tests automatiques (génération et relecture des codes-barres, presse-papier, réglages, démarrage automatique, choix du format de papier) ; **ne prenez que l'exécutable d'un lancement marqué d'une coche verte** (onglet *Actions*). En revanche, **les fenêtres « Étiquettes en série » et « Codes-barres en série » n'ont jamais été essayées sur un vrai poste Windows, ni avec une vraie Brother QL-800** (aspect des fenêtres, longueur exacte et position du texte sur l'étiquette, comportement du pilote quand 90 étiquettes partent d'affilée, lecture de vos vrais fichiers Excel et Word) : les tests automatiques vérifient la lecture des listes, le dessin des étiquettes et le déroulement d'une série, pas le papier qui sort. La partie impression est la plus délicate (chaque pilote nomme ses formats de papier à sa façon). **Imprimez d'abord 2 ou 3 étiquettes** et comparez-les à celles de P-touch Editor avant de lancer toute la série. Si quelque chose ne va pas, voir [Si l'impression ne va pas](#si-limpression-ne-va-pas) : un réglage dans un petit fichier texte suffit en général.
 
 ## Sommaire
 
@@ -17,6 +18,7 @@ Un seul fichier, **`BarcodeTray.exe`** : pas d'installation, pas de droits admin
 - [Premier lancement](#premier-lancement)
 - [Utilisation au quotidien](#utilisation-au-quotidien)
 - [Étiquettes en série (plans de châssis)](#étiquettes-en-série-plans-de-châssis)
+- [Codes-barres en série (liste)](#codes-barres-en-série-liste)
 - [Régler l'imprimante QL-800](#régler-limprimante-ql-800)
 - [Si l'impression ne va pas](#si-limpression-ne-va-pas)
 - [Réglages (settings.json)](#réglages-settingsjson)
@@ -63,10 +65,11 @@ Les artefacts sont conservés 90 jours. Pour en obtenir un nouveau : onglet **Ac
 
 - **Texte** : taper (ou coller) le texte, 200 caractères au maximum. Code 128 ne gère que l'**ASCII** : lettres **sans accent**, chiffres, espace et ponctuation courante. Un caractère non géré (é, œ, €, retour à la ligne, espace insécable venue d'un copier-coller depuis Word ou Excel...) est refusé avec un message qui le nomme ; dans le cas d'une espace insécable, il suffit de la remplacer par une espace normale.
 - **Générer** (ou touche Entrée) : l'image est placée dans le presse-papier. Aller dans Word ou Excel et faire **Ctrl+V**. L'image est enregistrée à 300 points par pouce : elle arrive à sa taille réelle (quelques centimètres de large) et peut être redimensionnée à la souris en gardant les proportions. Aucun fichier n'est créé.
-- **Imprimer** : imprime tout de suite l'étiquette sur l'imprimante choisie, sans boîte de dialogue ni fenêtre « Impression en cours ». Il n'est pas nécessaire d'avoir cliqué sur Générer avant, et le presse-papier n'est pas modifié. La longueur de l'étiquette s'adapte à l'image et la QL-800 coupe toute seule.
+- **Imprimer** : imprime tout de suite l'étiquette sur l'imprimante choisie, sans boîte de dialogue ni fenêtre « Impression en cours ». Il n'est pas nécessaire d'avoir cliqué sur Générer avant, et le presse-papier n'est pas modifié. La longueur de l'étiquette s'adapte à l'image et la QL-800 coupe toute seule. Si une série d'étiquettes (ou de codes-barres) est déjà en train d'envoyer des travaux à la même imprimante, le programme refuse et le dit, pour ne pas mélanger les étiquettes.
 - **Fermer la fenêtre** (croix, Alt+F4, Échap) ne quitte pas le programme : il reste dans la zone de notification. Clic gauche sur l'icône : masquer la fenêtre si elle est devant, sinon l'afficher et la ramener devant (même si elle est cachée derrière Word ou Excel). **Clic droit** sur l'icône :
   - **Ouvrir** ;
   - **Étiquettes en série (tableau Excel)…** (voir la section suivante) ;
+  - **Codes-barres en série (liste)…** (voir [Codes-barres en série](#codes-barres-en-série-liste)) ;
   - **Lancer au démarrage de Windows** (case à cocher) ;
   - **Copier le diagnostic d'impression** (voir plus bas) ;
   - **Quitter** (la façon normale d'arrêter le programme ; « Fin de tâche » dans le Gestionnaire des tâches l'arrête aussi).
@@ -149,6 +152,7 @@ Pendant l'impression, seul le bouton **Arrêter** est actif et la fenêtre ne pe
 - Si c'est la **préparation du papier**, avant la première étiquette, qui n'a pas reçu de réponse en 60 secondes (le message dit « Rien n'a été envoyé »), aucune étiquette n'est partie et aucune ligne n'est marquée `?`. Les boutons d'impression restent grisés (le message de collage le rappelle) jusqu'à ce que Windows réponde : un message « La préparation du papier ... a fini par aboutir » vous prévient, vous pouvez alors relancer l'impression.
 - Si vous avez demandé plusieurs copies et que la série s'arrête au milieu d'une étiquette (`arrêtée` ou `✖ échec` avec « 2/3 copies »), le message le précise : la reprise réimprime **toutes** les copies de cette ligne.
 - Si vous quittez le programme (menu de l'icône) pendant une série, il demande confirmation.
+- **Une seule fenêtre à la fois imprime sur une imprimante donnée** : si une série de codes-barres (ou le bouton **Imprimer** de la fenêtre principale) envoie déjà des travaux à la même imprimante, ou si un envoi de l'une d'elles est resté sans réponse, cette fenêtre refuse de démarrer et le message nomme l'autre fenêtre (les étiquettes se mélangeraient sur le rouleau). Attendez la fin de l'autre série.
 
 ### Si les étiquettes en série ne sortent pas comme prévu
 
@@ -161,6 +165,109 @@ Pendant l'impression, seul le bouton **Arrêter** est actif et la fenêtre ne pe
 - **« Aucune croix (X) trouvée »** : le tableau collé n'a pas sa ligne d'en-tête, ou aucune croix n'est dans la sélection. Recopiez le tableau complet depuis Excel (Ctrl+A, Ctrl+C).
 - **Le bouton « Coller depuis Excel » ne colle rien** : le presse-papier doit contenir du texte copié depuis des cellules Excel (pas une image, pas un fichier). Recommencez Ctrl+C dans Excel.
 - Le journal (`%LOCALAPPDATA%\BarcodeTray\barcodetray.log`) note les nombres d'étiquettes, l'imprimante, le papier retenu et les erreurs, **jamais** les types ni les n° de plan.
+
+## Codes-barres en série (liste)
+
+Pour fabriquer et imprimer **plusieurs codes-barres d'un seul coup** (références, numéros de série, codes articles...) au lieu de les taper un par un dans la fenêtre principale. Vous chargez une **liste de textes** ; le tableau affiche, pour chaque ligne, **le texte du code** et **le code-barres correspondant en image** ; le bouton **Imprimer tous** les imprime l'un après l'autre, en série, d'un seul clic. Chaque code-barres est identique à celui de la fenêtre principale (même dessin, mêmes réglages, même papier).
+
+### Ouvrir la fenêtre
+
+- clic droit sur l'icône de la zone de notification, puis **Codes-barres en série (liste)…** ;
+- ou le lien **Codes-barres en série…** tout en bas à droite de la fenêtre principale, sur la même ligne que **Étiquettes en série…**.
+
+La fenêtre s'appelle **Codes-barres en série**. Comme les autres, la fermer (croix, Échap) la masque seulement : elle garde sa liste tant que le programme tourne. Elle peut être agrandie à la souris.
+
+### 1. Préparer la liste
+
+Une valeur par ligne. Trois façons de la charger (elles remplacent toujours la liste actuelle, sans question) :
+
+- **Coller** (bouton, ou **Ctrl+V** dans la fenêtre) : une colonne copiée dans **Excel**, des lignes ou des paragraphes copiés dans **Word**, des lignes du **Bloc-notes**. Si vous copiez plusieurs colonnes dans Excel, seule la première cellule de chaque ligne est gardée (une remarque orange le dit) ;
+- **Ouvrir un fichier…** : un fichier `.txt`, `.csv`, `.xlsx` ou `.docx` ;
+- **glisser-déposer** : faire glisser **un** fichier depuis l'Explorateur sur la fenêtre (un dossier, ou plusieurs fichiers à la fois, sont refusés avec un message).
+
+La case **La première ligne est un titre (l'ignorer)** (décochée au départ) sert quand la liste commence par un titre de colonne (« Référence », « Code »...) qui ne doit pas devenir un code-barres. **Cochez-la avant** de coller ou d'ouvrir : elle ne change pas une liste déjà chargée. **Elle ne vaut que pour UN chargement** : une fois la liste chargée, la case se décoche toute seule (sinon elle ferait perdre en silence le premier code de la liste suivante, collée plus tard sans titre), et le message du bas nomme la ligne écartée (« Titre ignoré : « Référence » »). Si le chargement échoue, elle reste cochée pour que vous puissiez réessayer.
+
+**Préparer la liste dans Word.** Un code par **paragraphe** (touche **Entrée**) : pas de **Maj+Entrée** (deux codes sur deux lignes d'un même paragraphe seraient lus comme un seul texte, avec une remarque orange), pas de tabulation entre un code et sa description (le paragraphe entier deviendrait le code-barres : mettez les codes dans la première colonne d'un **tableau** Word), et, de préférence, **sans puces ni numérotation automatique**. Dans un fichier `.docx` ils ne sont pas lus ; mais quand vous **copiez-collez** des lignes numérotées ou à puces, Word met le numéro devant chaque ligne (`1.` puis une tabulation) : le programme reconnaît cette numérotation (`1.` `a)` `(1)` `iv.` `1.2.` et les puces `•` `·`...) quand elle est sur presque toutes les lignes, lit alors le texte qui la suit et le dit en orange. En cas de doute, enregistrez le document en `.docx` et utilisez **Ouvrir un fichier…**.
+
+| Format | Ce qui est lu |
+|---|---|
+| **Texte collé** | Une valeur par ligne ; si les lignes ont plusieurs colonnes (tabulations), la première cellule de chaque ligne (sauf si cette première cellule n'est qu'un numéro ou une puce de liste Word : c'est alors la cellule suivante). Les lignes vides sont ignorées. |
+| `.txt` | Une valeur par ligne, la ligne entière (sans découpage). Les accents d'un fichier enregistré par le Bloc-notes ou Excel sont reconnus (UTF-8, UTF-16 ou Windows-1252). Si la plupart des lignes contiennent des tabulations (colonnes), la ligne entière est quand même utilisée et une remarque orange le signale : enregistrez plutôt en `.csv`, ou copiez la colonne puis **Coller**. |
+| `.csv` | La première colonne de chaque ligne. Le séparateur (`;` `,` ou tabulation, ou la ligne `sep=;` d'Excel) est reconnu tout seul ; les guillemets `"..."` sont acceptés. |
+| `.xlsx` (Excel) | La **première feuille visible**, dans la **première colonne non vide** (la plus à gauche qui contient des valeurs). Les lignes **masquées** (par exemple par un filtre) et les colonnes masquées sont ignorées, comme dans un copier-coller (une feuille filtrée de plusieurs centaines de milliers de lignes est parcourue en entier). Les cellules VRAI/FAUX et en erreur (`#N/A`...) sont ignorées, avec une remarque orange. |
+| `.docx` (Word) | Chaque paragraphe non vide, dans l'ordre du document. Dans un tableau, seulement la **première cellule** de chaque ligne (une remarque orange signale les autres colonnes qui contenaient du texte). Une tabulation ou un saut de ligne (Maj+Entrée) au milieu d'un paragraphe devient une espace dans le même code, avec une remarque orange. Les en-têtes, pieds de page et notes ne sont pas lus ; le texte supprimé en *suivi des modifications* non plus. |
+| `.xls`, `.xlsm`, `.ods`, `.doc`, `.docm`, `.rtf`, `.odt` | **Non pris en charge** : ouvrez le fichier dans Excel ou Word et enregistrez-le en `.xlsx` / `.docx` (Fichier, Enregistrer sous). |
+
+Règles communes : les espaces en début et fin de valeur et les caractères invisibles sont retirés ; une espace insécable (copier-coller depuis Word ou Excel), une tabulation ou un saut de ligne **au milieu** d'une valeur deviennent une espace normale (`A` Alt+Entrée `B` dans une cellule Excel donne le code `A B`, avec une remarque orange) ; les lignes vides sont ignorées ; **5 000 valeurs au maximum** (au-delà, le programme garde les 5 000 premières et le dit) ; un fichier de plus de **20 Mo** est refusé ; un fichier Office **protégé par un mot de passe** ne peut pas être lu (enregistrez-en une copie sans mot de passe). Aucun programme Excel ou Word n'est nécessaire pour lire les fichiers.
+
+**Excel : zéros de tête et grands nombres.** Un fichier `.xlsx` ouvert avec **Ouvrir un fichier…** (ou glissé sur la fenêtre) et un texte **collé** ou un `.csv` ne donnent pas la même chose, car Excel ne copie et n'exporte que ce qui est **affiché** :
+
+- **`.xlsx` : le programme lit ce qui est enregistré** dans la cellule. Une cellule saisie `00123` en format Nombre a déjà perdu ses zéros dans Excel : **mettez la colonne au format Texte avant de saisir ou de coller les codes** (sélectionner la colonne, clic droit, *Format de cellule*, *Texte*). Si les zéros viennent d'un format personnalisé fait seulement de zéros (`00000`, `"CH-"0000` : la cellule contient `123` et affiche `00123`), le programme les remet comme Excel les affiche (`00123`, `CH-0007`). Tout autre format d'affichage (décimales fixes `0,00`, séparateur de milliers, pourcentage, monétaire...) ne peut pas être reproduit : le programme garde la valeur brute (`5` pour un `5,00`) et le dit en orange (« nombre(s) affiché(s) avec un format Excel »). Une **date** est lue comme son numéro interne Excel (par exemple `45292`) : écrivez-la en texte (`2024-01-01`) si c'est ce que doit contenir le code-barres. Une cellule dont la formule n'a pas de résultat enregistré (fichier jamais ouvert dans Excel) est ignorée, avec une remarque orange : ouvrez le fichier dans Excel et enregistrez-le. Seules les cellules de la colonne lue comptent pour ces remarques.
+- **Coller (Ctrl+C dans Excel) et `.csv` : le programme reçoit le texte AFFICHÉ.** Un code de 13 chiffres (EAN) saisi en format Standard dans une colonne étroite s'affiche `5,9012E+12` : c'est ce texte qui est copié ou exporté, et les derniers chiffres sont **définitivement perdus** à ce stade. Le programme repère ces valeurs en notation scientifique (un signe obligatoire après le `E`, comme `5,9012E+12` ou `1.5E-05`, que la liste vienne du presse-papiers, d'un `.txt`, d'un `.csv`, d'un `.docx` ou d'un `.xlsx`) et le dit en orange (« nombre(s) en notation scientifique ») ; il ne peut pas les corriger. **Avant de copier, élargissez la colonne** ou mettez-la au format **Texte** (puis ressaisissez les codes), ou ouvrez directement le fichier `.xlsx` : Excel en mémorise les 13 chiffres. Au-delà de 15 chiffres, Excel arrondit lui-même la fin du nombre (elle devient des zéros) : saisissez ces codes au format Texte.
+
+Après chaque chargement, le message du bas indique le nombre de valeurs lues, avec la provenance (« presse-papiers » ou le nom du fichier) : **vert** si tout va bien, **orange** si le programme a ignoré quelque chose (lignes vides, feuilles ou colonnes ignorées, limite de 5 000, lignes à corriger...), **rouge** si rien n'a pu être lu (la liste précédente est alors conservée).
+
+### 2. Vérifier et corriger la liste
+
+| Colonne | Contenu |
+|---|---|
+| **N°** | Numéro de la ligne (suit les suppressions). Un liseré **rouge** (ligne à corriger) ou **orange** (à vérifier) apparaît à gauche. |
+| **Texte du code** | Le texte encodé en Code 128. **Modifiable** (double-clic ou F2, Entrée valide). |
+| **Code-barres** | **Le vrai code-barres**, tel qu'il sera imprimé (barres et texte lisible dessous), réduit pour tenir dans la ligne. Il est dessiné au fur et à mesure que vous faites défiler la liste, donc 5 000 lignes ne ralentissent pas la fenêtre. |
+| **État** | Vide, `✖ invalide`, `⚠ barres fines`, `⚠ réduit`, puis pendant l'impression `en cours…`, `✔ imprimée`, `✖ échec`, `? à vérifier` ou `arrêtée` (voir plus bas). |
+
+- **Ligne invalide** (rouge) : texte vide, de plus de 200 caractères, ou contenant un caractère que Code 128 ne gère pas (lettre accentuée, euro, caractère de contrôle...). À la place du code-barres, un cadre rouge donne le message (aussi en info-bulle) ; il suffit de corriger le texte dans la cellule. **Tant qu'une ligne à imprimer est invalide, l'impression ne démarre pas** : le programme sélectionne la première ligne en cause et affiche son message.
+- **Ligne orange** : imprimable, mais à vérifier. `⚠ barres fines` : le texte est long, les barres les plus fines ne font plus qu'1 point (0,085 mm) et certains lecteurs ne les lisent plus sûrement ; `⚠ réduit` : le code-barres est trop large pour le ruban de 62 mm même avec des barres d'1 point, il sera réduit à l'impression. Raccourcissez le texte si votre lecteur a du mal (voir « Lisibilité selon la longueur du texte » plus haut).
+- **Doublons** : un même texte peut figurer plusieurs fois ; il est imprimé autant de fois. Le résumé le signale (« 4 doublons ») pour que vous ne l'ignoriez pas.
+- Sous la liste, le **résumé** compte les lignes et les remarques : « 88 codes-barres — 2 invalides, 3 à barres fines, 1 réduit pour tenir, 4 doublons » (ou « tous valides »). Avec plusieurs copies : « 88 codes-barres x 2 copies = 176 impressions ».
+- **Suppr** supprime les lignes sélectionnées (Ctrl+clic ou Maj+clic pour en choisir plusieurs, **Ctrl+A** pour toutes). **Vider la liste** efface tout. Il n'y a pas de ligne vide en bas pour ajouter : rechargez la liste pour ajouter des codes.
+- **Clic droit** sur une ligne (un clic droit sur l'en-tête ou dans une zone vide n'ouvre pas de menu) : **Copier le code-barres (image)** (met l'image dans le presse-papiers, comme **Générer** de la fenêtre principale : collez-la avec Ctrl+V dans Word ou Excel) et **Copier le texte**. Le menu agit sur la ligne où vous avez cliqué, même si plusieurs lignes sont sélectionnées. **Ctrl+C** dans le tableau copie le texte des lignes sélectionnées, une par ligne.
+- Modifier un texte efface son état (`✔ imprimée` disparaît : la ligne n'est plus celle qui est sortie).
+
+### 3. Imprimer
+
+> **Première fois : faites un essai de 2 ou 3 codes-barres, pas toute la liste.** Sélectionnez 2 ou 3 lignes (Ctrl+clic), cliquez sur **Imprimer la sélection**, et vérifiez avec votre lecteur que les étiquettes se lisent.
+
+1. Choisissez l'imprimante (la **Brother QL-800** est présélectionnée, le choix est mémorisé) et, si besoin, le nombre de **Copies par code-barres** (1 à 99).
+2. Cliquez sur :
+   - **Imprimer tous** : toute la liste ;
+   - **Imprimer la sélection** : seulement les lignes sélectionnées ;
+   - **Imprimer à partir de la sélection** : de la première ligne sélectionnée jusqu'à la fin (pour **reprendre** après un arrêt ou une erreur).
+3. Si la case **Confirmer avant d'imprimer** est cochée (réglage mémorisé, commun avec la fenêtre des étiquettes en série), une seule question est posée : « Imprimer 88 codes-barres sur « Brother QL-800 » ? ».
+   **Exception : des lignes déjà imprimées.** Si la série contient des lignes déjà marquées `✔ imprimée`, le programme le dit **toujours**, même avec la case décochée, car ces codes-barres sortiraient en double. Trois réponses : **Oui** (tout imprimer), **Non** (seulement ceux qui ne sont pas encore imprimés ; réponse proposée par défaut) ou **Annuler**.
+4. L'impression part **en silence**, sans boîte de dialogue. La barre de progression et le message indiquent où en est la série (« Code-barres 12 / 88 (ABC-123)… ») et la colonne **État** se remplit au fur et à mesure. À la fin : « ✔ 88 codes-barres envoyés à « Brother QL-800 ». » ; si certains avaient des barres très fines ou ont été réduits, le message (en orange) en donne le nombre.
+
+Chaque code-barres (et chaque copie) est envoyé comme un **travail d'impression séparé** : la QL-800 **coupe après chacun**, avec la longueur d'étiquette adaptée à l'image (comme **Imprimer** dans la fenêtre principale). Gardez **Couper à la fin / Cut at end** activé dans les options du pilote (voir [Régler l'imprimante QL-800](#régler-limprimante-ql-800)). Les réglages d'image et de papier sont ceux de la fenêtre principale (`ModulePx`, `BarHeightPx`, `MaxWidthPx`, `FontName`, `FontSizePt`, `PaperName`, `CheckPrinterStatus`, `CheckPaper`...) : aucun nouveau réglage.
+
+### Arrêter, reprendre
+
+Les règles sont celles des étiquettes en série (voir [Arrêter, reprendre](#arrêter-reprendre)) :
+
+- **`✔ imprimée` veut dire « envoyée à Windows »**, pas « sortie de l'imprimante » : Windows reçoit les codes-barres en quelques secondes puis les envoie un par un à la QL-800, qui peut imprimer encore un moment après. **Arrêter ne rappelle pas ce qui est déjà envoyé** (videz au besoin la file d'impression de Windows).
+- **Arrêter** : la série s'arrête **avant le code-barres suivant**. Le message dit combien sont partis et sur quelle ligne reprendre : sélectionnez-la puis **Imprimer à partir de la sélection**.
+- **En cas d'échec** (imprimante éteinte, plus de ruban, capot ouvert...), la série **s'arrête tout de suite sur cette ligne** et le message rouge dit laquelle et pourquoi. Le programme **ne réessaie jamais tout seul** (risque de doublon). Corrigez le problème, puis **Imprimer à partir de la sélection** (la ligne en échec est déjà sélectionnée).
+- **Série lancée avec Imprimer la sélection** (par exemple l'essai de 2 ou 3 lignes) : après un arrêt ou un échec, le programme **garde le reste de votre sélection** (la ligne en cause et celles qui suivaient dans la sélection sont déjà re-sélectionnées) et le message dit de recliquer sur **Imprimer la sélection**. N'utilisez pas **Imprimer à partir de la sélection** dans ce cas : il imprimerait toute la fin de la liste.
+- **Une seule fenêtre à la fois imprime sur une imprimante donnée.** Si vous lancez une série (ou **Imprimer** dans la fenêtre principale, ou une série d'étiquettes de châssis) pendant qu'une autre fenêtre envoie déjà des travaux à la **même imprimante**, le programme refuse avec un message qui nomme la fenêtre en cours : les étiquettes de deux séries se mélangeraient sur le rouleau. Il en va de même tant qu'un envoi resté sans réponse (`? à vérifier`) n'est pas terminé. Deux imprimantes différentes peuvent travailler en même temps.
+- **`? à vérifier`** : Windows n'a pas confirmé l'envoi en 60 secondes. Regardez la file d'impression de Windows : l'étiquette est peut-être sortie. Les boutons d'impression restent inactifs jusqu'à la réponse de Windows (sinon elle sortirait en double plus tard).
+- Pendant l'impression, seul le bouton **Arrêter** est actif et la fenêtre ne peut pas être fermée. Si vous quittez le programme (menu de l'icône) pendant une série, il demande confirmation.
+
+### Si la liste ne se charge pas comme prévu
+
+- **« enregistrez-le en .xlsx / .docx »** : le fichier est dans un ancien format (`.xls`, `.doc`) ou un autre (`.rtf`, `.odt`). Ouvrez-le dans Excel ou Word, *Enregistrer sous*, et choisissez *Classeur Excel (.xlsx)* ou *Document Word (.docx)*.
+- **Fichier protégé par un mot de passe** : non lisible ; enregistrez une copie sans mot de passe.
+- **« Aucune valeur trouvée »** : le fichier ou le presse-papiers ne contient aucun texte exploitable (vide, ou seulement des lignes vides). Pour un `.xlsx`, vérifiez que la liste est sur la **première feuille** et que les lignes ne sont pas toutes masquées par un filtre.
+- **Seule une partie de la liste est lue** : seule la première feuille et la première colonne non vide d'un fichier Excel sont lues ; le message orange le rappelle quand d'autres feuilles ou colonnes contiennent des données. Mettez les codes dans une seule colonne de la première feuille.
+- **Zéros de tête disparus, nombre en `E+`, date devenue un nombre** : voir « Excel : zéros de tête et grands nombres » plus haut (colonne au format **Texte**).
+- **Le titre de colonne est devenu un code-barres** : cochez **La première ligne est un titre (l'ignorer)**, puis rechargez la liste (la case se décoche après chaque chargement réussi).
+- **Le premier code de ma liste manque** : le message du bas disait « Titre ignoré : « ... » » ? La case **La première ligne est un titre** était cochée : rechargez la liste sans la cocher.
+- **Ligne rouge pour une lettre accentuée** : Code 128 ne gère que l'ASCII (lettres **sans** accent) ; corrigez le texte dans la cellule.
+- **Des codes « 1. », « 2. »... à la place de mes codes (liste collée depuis Word)** : c'est la numérotation automatique de Word, copiée devant chaque ligne. Elle est reconnue quand elle est sur presque toutes les lignes (le message orange dit alors que la deuxième colonne a été lue) ; sinon retirez la numérotation dans Word avant de copier, ou enregistrez en `.docx` et utilisez **Ouvrir un fichier…**.
+- **Deux codes collés en un seul (`CODE-B CODE-C`)** : un saut de ligne **Maj+Entrée** (ou une tabulation) sépare les deux dans le même paragraphe Word, ou un saut de ligne est à l'intérieur d'une cellule Excel (Alt+Entrée) : une remarque orange le signale. Mettez un code par paragraphe (touche Entrée) ou par cellule.
+- **« Seule la première colonne des tableaux a été lue »** (fichier `.docx`) : le tableau Word a d'autres colonnes avec du texte ; seule la première cellule de chaque ligne devient un code-barres. Mettez les codes dans la première colonne.
+- **« Titre ignoré »** dans le message : voir plus haut ; **« nombre(s) en notation scientifique »** et **« nombre(s) affiché(s) avec un format Excel »** : voir « Excel : zéros de tête et grands nombres ».
+- **Le bouton « Coller » ne colle rien** : le presse-papiers doit contenir du texte (cellules Excel, lignes Word ou Bloc-notes), pas une image ni un fichier copié dans l'Explorateur (pour un fichier, utilisez *Ouvrir un fichier…* ou le glisser-déposer).
+- Pour un problème de papier ou de pilote à l'impression, voir [Si l'impression ne va pas](#si-limpression-ne-va-pas) : les codes-barres en série passent par le même chemin d'impression que le bouton **Imprimer**.
+- Le journal (`%LOCALAPPDATA%\BarcodeTray\barcodetray.log`) note les nombres de lignes, l'imprimante, le papier retenu et les erreurs, **jamais** le texte des codes-barres ni le nom de vos fichiers.
 
 ## Régler l'imprimante QL-800
 
@@ -217,9 +324,11 @@ Fichier texte JSON modifiable avec le Bloc-notes : `%APPDATA%\BarcodeTray\settin
 | `BatchTypeLeftMm` | `1.9` | Distance entre le bord gauche de l'étiquette et le bord gauche du type, en mm (0 à 60). |
 | `BatchTypeBaselineMm` | `10.6` | Distance entre le haut de l'étiquette et le bas des lettres (ligne de base) du type, en mm (1 à 300). |
 | `BatchPlanBaselineMm` | `32.0` | Distance entre le haut de l'étiquette et le bas des chiffres du n° de plan, en mm (1 à 300). |
-| `BatchConfirm` | `true` | Demande « Imprimer N étiquettes sur ... ? » avant d'imprimer plus d'une étiquette (case « Confirmer avant d'imprimer » de la fenêtre). |
+| `BatchConfirm` | `true` | Demande « Imprimer N étiquettes sur ... ? » avant d'imprimer plus d'une étiquette (case « Confirmer avant d'imprimer » de la fenêtre des étiquettes en série, et aussi de celle des codes-barres en série). |
 
 Les étiquettes en série utilisent aussi `PrinterName`, `Dpi`, `LabelWidthMm`, `CheckPrinterStatus` et `CheckPaper` (mêmes rôles que pour les codes-barres). Laissez **`PaperName` vide** pour elles : un format prédécoupé imposerait sa propre longueur à toutes les étiquettes (et si cette longueur est plus courte que le texte, le programme refuse la série avec un message rouge plutôt que d'imprimer des numéros coupés).
+
+Les **codes-barres en série** n'ont **aucun réglage à eux** : ils utilisent ceux du bouton **Imprimer** de la fenêtre principale (`PrinterName`, `Dpi`, `ModulePx`, `MaxWidthPx`, `BarHeightPx`, `FontName`, `FontSizePt`, `LabelWidthMm`, `MinLabelLengthMm`, `PaperName`, `CheckPrinterStatus`, `CheckPaper`) et la case `BatchConfirm`. Ici, contrairement aux étiquettes en série, `PaperName` peut être renseigné (étiquettes prédécoupées) puisque la longueur de chaque étiquette suit l'image.
 
 Exemple :
 
@@ -260,7 +369,7 @@ Structure (dossier `BarcodeTray/` de ce dépôt) :
 | Chemin | Contenu |
 |---|---|
 | `src/Code128/` | Encodeur Code 128 (.NET 8, aucune dépendance), encodage optimal sur les jeux A, B et C. |
-| `src/BarcodeTray/` | Application Windows Forms (C# 12, .NET 8), aucune dépendance NuGet. |
+| `src/BarcodeTray/` | Application Windows Forms (C# 12, .NET 8), aucune dépendance NuGet. Les fenêtres de série : `BatchForm` / `BatchLogic` (étiquettes de plans) et `BarcodeBatchForm` / `BarcodeBatchLogic` (codes-barres d'une liste ; `ListFileReader` lit les `.txt`, `.csv`, `.xlsx` et `.docx` avec `System.IO.Compression` et `System.Xml` seulement). |
 | `tests/Code128.Tests/` | Tests de l'encodeur (xUnit, tournent sous Linux et Windows ; ZXing.Net sert de décodeur indépendant). |
 | `tests/BarcodeTray.Tests/` | Tests de l'application (xUnit, Windows uniquement : dessin GDI+, presse-papier, registre...). |
 | `tools/make_icon.py` | Génère `src/BarcodeTray/Assets/app.ico` (Python, bibliothèque standard seulement). |
