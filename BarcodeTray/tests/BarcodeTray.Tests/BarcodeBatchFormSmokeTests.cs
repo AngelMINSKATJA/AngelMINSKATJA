@@ -49,7 +49,7 @@ public class BarcodeBatchFormSmokeTests
         {
             using BarcodeBatchForm form = NewForm();
 
-            Assert.Equal("Codes-barres en série", form.Text);
+            Assert.Equal("Codes-barres en série — POG's Industries Labels v3", form.Text);
             Assert.True(form.MinimumSize.Width >= 760 && form.MinimumSize.Height >= 560);
             Assert.True(form.AllowDrop);
             Assert.Equal(0, form.RowCount);

@@ -14,7 +14,7 @@ namespace BarcodeTray;
 /// </summary>
 internal sealed class TrayApplicationContext : ApplicationContext
 {
-    private const string TrayTip = "Code-barres Code 128";
+    private const string TrayTip = AppInfo.DisplayName;
     private const int DiagnosticsTimeoutMs = 25_000;
 
     // Un clic sur l'icône désactive d'abord la fenêtre (le focus passe à la barre des tâches) puis arrive quelques
@@ -466,7 +466,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             DialogResult answer = MessageBox.Show(
                 "Une série d'étiquettes est en cours d'impression.\n\nQuitter l'arrête tout de suite "
                 + "(l'étiquette en cours d'envoi peut ne pas sortir). Quitter quand même ?",
-                chassisPrinting ? "Étiquettes en série" : "Codes-barres en série",
+                AppInfo.WindowTitle(chassisPrinting ? "Étiquettes en série" : "Codes-barres en série"),
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning,
                 MessageBoxDefaultButton.Button2);
@@ -583,7 +583,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             else
             {
                 Log.Error("Diagnostic : l'énumération des imprimantes n'a pas répondu à temps.");
-                text = "=== Diagnostic d'impression - Code-barres Code 128 ===" + Environment.NewLine
+                text = "=== Diagnostic d'impression - " + AppInfo.DisplayName + " ===" + Environment.NewLine
                        + "Diagnostic incomplet : Windows n'a pas répondu à la liste des imprimantes en "
                        + DiagnosticsTimeoutMs / 1000 + " s." + Environment.NewLine + Environment.NewLine
                        + snapshot.ToJson();

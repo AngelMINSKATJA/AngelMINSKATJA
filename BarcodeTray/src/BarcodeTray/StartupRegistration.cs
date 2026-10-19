@@ -16,7 +16,14 @@ public static class StartupRegistration
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ApprovedKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
-    private const string ValueName = "BarcodeTray";
+
+    /// <summary>
+    /// Nom de la valeur dans la clé Run (et dans StartupApproved\Run). Nom TECHNIQUE, volontairement indépendant du nom affiché
+    /// (<see cref="AppInfo"/>) et du nom du fichier .exe : il identifie « notre » entrée d'une version à l'autre. Ainsi, après un
+    /// renommage du logiciel, <see cref="EnsurePathCurrent"/> réécrit simplement le chemin de l'exe dans la MÊME valeur (aucun
+    /// doublon, et un démarrage désactivé par l'utilisateur dans le Gestionnaire des tâches le reste).
+    /// </summary>
+    internal const string ValueName = "BarcodeTray";
 
     private static bool _disabledByWindowsLogged;
 
@@ -201,11 +208,20 @@ public static class StartupRegistration
             // Lancé depuis le ZIP ouvert dans l'Explorateur ou depuis un dossier temporaire : cet emplacement
             // disparaîtra, l'enregistrer casserait le démarrage automatique au prochain redémarrage.
             Log.Warn("Exécutable lancé depuis un emplacement temporaire (" + path + ") : démarrage automatique non modifié. "
-                     + "Copiez BarcodeTray.exe dans un dossier permanent puis relancez-le.");
+                     + "Copiez " + AppInfo.FileBaseName + ".exe dans un dossier permanent puis relancez-le.");
             return null;
         }
 
-        return "\"" + path + "\" --tray";
+        return FormatCommand(path);
+    }
+
+    /// <summary>
+    /// Ligne de commande enregistrée pour un exécutable donné : le chemin ENTRE GUILLEMETS (il peut contenir des espaces :
+    /// « POGs Industries Labels v3.exe », « C:\Users\Marie Dupont\... ») suivi de l'argument --tray.
+    /// </summary>
+    internal static string FormatCommand(string exePath)
+    {
+        return "\"" + exePath + "\" --tray";
     }
 
     /// <summary>

@@ -10,7 +10,10 @@ namespace BarcodeTray;
 
 internal static class Program
 {
-    private const string AppTitle = "Code-barres Code 128";
+    private const string AppTitle = AppInfo.DisplayName;
+
+    // Noms techniques : ils NE suivent PAS le nom affiché (AppInfo). Une ancienne et une nouvelle version du programme
+    // doivent se reconnaître comme « la même application » (une seule instance par session), voir AppInfo.
     private const string MutexName = @"Local\BarcodeTray.SingleInstance";
     private const string ShowEventName = @"Local\BarcodeTray.Show";
     private const int MaxErrorDialogs = 3;
@@ -56,7 +59,7 @@ internal static class Program
         }
 
         bool startInTray = HasFlag(args, "--tray");
-        Log.Info("Démarrage (version " + typeof(Program).Assembly.GetName().Version + ", arguments : "
+        Log.Info("Démarrage de " + AppInfo.DisplayName + " (version " + typeof(Program).Assembly.GetName().Version + ", arguments : "
                  + (args.Length == 0 ? "(aucun)" : string.Join(" ", args)) + ", exécutable : "
                  + (Environment.ProcessPath ?? "?") + ").");
 
@@ -134,7 +137,7 @@ internal static class Program
         {
             if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
             {
-                WriteError("Usage : BarcodeTray.exe --selftest <fichier.png>");
+                WriteError("Usage : \"" + AppInfo.FileBaseName + ".exe\" --selftest <fichier.png>");
                 return 2;
             }
 
@@ -181,7 +184,7 @@ internal static class Program
         {
             if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
             {
-                WriteError("Usage : BarcodeTray.exe --selftest-label <fichier.png>");
+                WriteError("Usage : \"" + AppInfo.FileBaseName + ".exe\" --selftest-label <fichier.png>");
                 return 2;
             }
 

@@ -21,7 +21,7 @@ namespace BarcodeTray;
 /// </summary>
 internal sealed class BatchForm : Form
 {
-    private const string AppTitle = "Étiquettes en série — plans de châssis";
+    private static readonly string AppTitle = AppInfo.WindowTitle("Étiquettes en série — plans de châssis");
     private const string HintText = "Collez le tableau copié depuis Excel pour commencer.";
     private const string NoTextMessage =
         "Le presse-papiers ne contient pas de texte. Dans Excel, sélectionnez le tableau AVEC sa ligne d'en-tête "

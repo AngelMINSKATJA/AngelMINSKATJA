@@ -64,7 +64,7 @@ internal readonly record struct PaperProbe(PaperCandidate Candidate, int PageHei
 /// </summary>
 public static class LabelPrinter
 {
-    private const string DocumentName = "Code-barres Code 128";
+    private const string DocumentName = AppInfo.DisplayName; // nom du travail dans la file d'impression
     private const int MaxPaperLengthUnits = 4000; // ~ 1 m, limite des QL
     private const double FitTolerance = 1.02;     // 2 % de débordement toléré (zone de silence rognée)
     private const int MaxGrowAttempts = 3;        // essais de rallongement de la page par candidat
@@ -1510,7 +1510,7 @@ public static class LabelPrinter
             s = new AppSettings();
         }
 
-        sb.AppendLine("=== Diagnostic d'impression - Code-barres Code 128 ===");
+        sb.AppendLine("=== Diagnostic d'impression - " + AppInfo.DisplayName + " ===");
         Guard(sb, "environnement", () =>
         {
             Version? version = Assembly.GetExecutingAssembly().GetName().Version;

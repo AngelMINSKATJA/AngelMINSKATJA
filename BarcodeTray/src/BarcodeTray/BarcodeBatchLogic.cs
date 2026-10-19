@@ -80,7 +80,7 @@ internal static class BarcodeBatchLogic
     /// <summary>Texte maximal montré d'un code-barres dans un message (le reste est remplacé par « … »).</summary>
     internal const int MaxDisplayedTextLength = 24;
 
-    internal const string AppTitle = "Codes-barres en série";
+    internal static readonly string AppTitle = AppInfo.WindowTitle("Codes-barres en série");
 
     internal const string NoCodesText = "Aucun code-barres : collez une colonne copiée depuis Excel ou Word, ou ouvrez un fichier.";
 

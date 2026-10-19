@@ -15,7 +15,7 @@ namespace BarcodeTray;
 /// </summary>
 internal sealed class MainForm : Form
 {
-    private const string AppTitle = "Code-barres Code 128";
+    private const string AppTitle = AppInfo.DisplayName;
     private const string HintText =
         "Saisissez un texte, puis cliquez sur « Générer » pour le copier dans le presse-papier, "
         + "ou sur « Imprimer » pour imprimer l'étiquette.";

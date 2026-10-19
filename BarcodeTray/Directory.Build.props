@@ -7,7 +7,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
     <!-- Symboles de débogage DANS les .dll/.exe (jamais de fichier .pdb séparé) :
-         le dossier de publication ne contient ainsi que BarcodeTray.exe, et les traces d'erreur du
+         le dossier de publication ne contient ainsi que « POGs Industries Labels v3.exe », et les traces d'erreur du
          journal indiquent les numéros de ligne. -->
     <DebugType>embedded</DebugType>
 

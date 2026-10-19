@@ -7,7 +7,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>12.0</LangVersion>
-    <AssemblyName>BarcodeTray</AssemblyName>
+
+    <!--
+      Nom du logiciel : « POG's Industries Labels v3 » (voir AppInfo.cs). AssemblyName = nom du fichier publié :
+      « POGs Industries Labels v3.exe » (sans apostrophe, les espaces sont voulus). AppInfo.FileBaseName doit rester identique.
+      Le reste est volontairement INCHANGÉ pour qu'une mise à jour ne fasse rien perdre à l'utilisateur : espace de noms
+      (RootNamespace), dossiers %APPDATA%\BarcodeTray et %LOCALAPPDATA%\BarcodeTray, valeur de démarrage « BarcodeTray »
+      du registre, noms du mutex et de l'événement « une seule instance » (constantes dans le code, pas dans ce fichier).
+    -->
+    <AssemblyName>POGs Industries Labels v3</AssemblyName>
     <RootNamespace>BarcodeTray</RootNamespace>
 
     <!-- Exécutable 64 bits, jamais d'élévation (voir app.manifest : asInvoker) -->
@@ -15,13 +23,20 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
 
-    <!-- Informations de version (onglet "Détails" des propriétés du fichier .exe) -->
-    <Version>1.0.0</Version>
-    <AssemblyTitle>Code-barres Code 128</AssemblyTitle>
-    <Product>BarcodeTray</Product>
-    <Description>Utilitaire de barre d'état : génère un code-barres Code 128, le copie dans le presse-papier ou l'imprime sur une imprimante d'étiquettes.</Description>
-    <Company>BarcodeTray</Company>
-    <Copyright>BarcodeTray</Copyright>
+    <!--
+      Informations de version (onglet "Détails" des propriétés du fichier .exe).
+      AssemblyTitle devient la « Description du fichier » : c'est le nom que Windows affiche dans le Gestionnaire des tâches
+      et dans Paramètres > Applications > Démarrage. Il doit rester égal à AppInfo.DisplayName, et la version majeure de
+      Version à AppInfo.MajorVersion (deux tests le vérifient).
+    -->
+    <Version>3.0.0</Version>
+    <AssemblyVersion>3.0.0.0</AssemblyVersion>
+    <FileVersion>3.0.0.0</FileVersion>
+    <AssemblyTitle>POG's Industries Labels v3</AssemblyTitle>
+    <Product>POG's Industries Labels</Product>
+    <Description>Utilitaire de barre d'état : génère un code-barres Code 128, le copie dans le presse-papier ou l'imprime sur une imprimante d'étiquettes (étiquettes en série comprises).</Description>
+    <Company>POG's Industries</Company>
+    <Copyright>Copyright © POG's Industries</Copyright>
 
     <!-- Un seul exécutable : pas de culture "satellite", pas de globalisation ICU (aucun fichier à côté de l'exe) -->
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -34,7 +49,7 @@
 
   <!--
     Publication : dotnet publish src/BarcodeTray -c Release -o publish
-    => un seul fichier BarcodeTray.exe, autonome (le runtime .NET est inclus, rien à installer),
+    => un seul fichier « POGs Industries Labels v3.exe », autonome (le runtime .NET est inclus, rien à installer),
        compressé, pré-compilé (ReadyToRun) pour un démarrage rapide.
     Pas de PublishTrimmed : Windows Forms ne le prend pas en charge.
   -->

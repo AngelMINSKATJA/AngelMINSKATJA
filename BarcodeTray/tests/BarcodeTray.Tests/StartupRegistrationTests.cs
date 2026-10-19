@@ -145,6 +145,29 @@ public class StartupRegistrationTests : IDisposable
         Assert.Equal(ExpectedCommand(), ReadRawValue());
     }
 
+    [Fact]
+    public void EnsurePathCurrent_AfterTheRename_RewritesTheSameValue_WithoutAddingAnotherEntry()
+    {
+        // L'utilisateur avait la version précédente (BarcodeTray.exe) au démarrage ; il lance « POGs Industries Labels v3.exe ».
+        Assert.Equal("BarcodeTray", StartupRegistration.ValueName);
+        WriteRawValue("\"C:\\Users\\Marie Dupont\\Documents\\BarcodeTray.exe\" --tray");
+        string[] before = ReadOtherValueNames();
+
+        Assert.True(StartupRegistration.EnsurePathCurrent());
+
+        Assert.Equal(ExpectedCommand(), ReadRawValue());          // la MÊME valeur pointe maintenant vers l'exe en cours
+        Assert.Equal(before, ReadOtherValueNames());              // aucune entrée en plus (ni « POG... », ni doublon)
+        Assert.True(StartupRegistration.IsEnabled());
+    }
+
+    private static string[] ReadOtherValueNames()
+    {
+        using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, false);
+        string[] names = key?.GetValueNames() ?? Array.Empty<string>();
+        Array.Sort(names, StringComparer.OrdinalIgnoreCase);
+        return Array.FindAll(names, n => !string.Equals(n, ValueName, StringComparison.OrdinalIgnoreCase));
+    }
+
     // ---------------------------------------------------------------- StartupApproved (robustness-4)
 
     [Theory]

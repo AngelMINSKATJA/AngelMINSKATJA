@@ -34,7 +34,7 @@ public class BatchFormSmokeTests
         Sta.Run(() =>
         {
             using BatchForm form = NewForm();
-            Assert.Equal("Étiquettes en série — plans de châssis", form.Text);
+            Assert.Equal("Étiquettes en série — plans de châssis — POG's Industries Labels v3", form.Text);
             Assert.True(form.MinimumSize.Width >= 760 && form.MinimumSize.Height >= 560);
             Assert.Equal(0, form.LabelCount);
             Assert.Equal(BatchLogic.NoLabelsText, form.SummaryText);

@@ -22,7 +22,7 @@ public class PrintGateTests
             Assert.True(PrintGate.TryAcquire(printer, series, "Codes-barres en série", out string? none));
             Assert.Null(none);
 
-            Assert.False(PrintGate.TryAcquire(printer, main, "Code-barres Code 128", out string? busy));
+            Assert.False(PrintGate.TryAcquire(printer, main, AppInfo.DisplayName, out string? busy));
             Assert.Equal("Codes-barres en série", busy);
             Assert.False(PrintGate.IsHeldBy(main));
         }
