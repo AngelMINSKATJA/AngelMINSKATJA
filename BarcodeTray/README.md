@@ -1,4 +1,6 @@
-# BarcodeTray - Code-barres Code 128 pour étiquettes Brother QL-800
+# POG's Industries Labels v3 - Code-barres Code 128 pour étiquettes Brother QL-800
+
+*(Ce logiciel s'appelait « BarcodeTray » / « Code-barres Code 128 » : voir [Remplacer l'ancienne version](#remplacer-lancienne-version). Le nom technique « BarcodeTray » reste celui du dossier du projet, de l'espace de noms du code, du dossier des réglages et du journal.)*
 
 Petit utilitaire Windows qui vit dans la zone de notification (à côté de l'horloge) :
 
@@ -8,14 +10,15 @@ Petit utilitaire Windows qui vit dans la zone de notification (à côté de l'ho
 4. **Étiquettes en série** : on copie un tableau Excel (plans de châssis), le programme imprime **une étiquette par plan** (type de châssis en haut à gauche, n° de plan en grand dessous, 62 x 40 mm) en une seule fois, sans retaper ni valider chaque étiquette. Voir [Étiquettes en série](#étiquettes-en-série-plans-de-châssis).
 5. **Codes-barres en série** : on charge une **liste de textes** (colonne Excel, lignes Word ou Bloc-notes collées, ou fichier `.txt`, `.csv`, `.xlsx`, `.docx`), le programme affiche un tableau « texte du code / code-barres en image » et **Imprimer tous** envoie tous les codes-barres à l'imprimante, l'un après l'autre, en un seul clic. Voir [Codes-barres en série](#codes-barres-en-série-liste).
 
-Un seul fichier, **`BarcodeTray.exe`** : pas d'installation, pas de droits administrateur, pas besoin d'installer .NET (le programme embarque tout ce qu'il lui faut, y compris son propre .NET 8 ; le .NET Framework 4.8 du poste n'est pas utilisé). Le fichier fait environ 65 à 70 Mo, c'est normal. Il fonctionne sous **Windows 10 ou 11, en 64 bits** (Windows 7 n'est pas pris en charge).
+Un seul fichier, **`POGs Industries Labels v3.exe`** (sans apostrophe dans le nom du fichier) : pas d'installation, pas de droits administrateur, pas besoin d'installer .NET (le programme embarque tout ce qu'il lui faut, y compris son propre .NET 8 ; le .NET Framework 4.8 du poste n'est pas utilisé). Le fichier fait environ 65 à 70 Mo, c'est normal. Il fonctionne sous **Windows 10 ou 11, en 64 bits** (Windows 7 n'est pas pris en charge).
 
 > **État des tests, en toute franchise** : à chaque modification, GitHub compile le programme et lance des tests automatiques (génération et relecture des codes-barres, presse-papier, réglages, démarrage automatique, choix du format de papier) ; **ne prenez que l'exécutable d'un lancement marqué d'une coche verte** (onglet *Actions*). En revanche, **les fenêtres « Étiquettes en série » et « Codes-barres en série » n'ont jamais été essayées sur un vrai poste Windows, ni avec une vraie Brother QL-800** (aspect des fenêtres, longueur exacte et position du texte sur l'étiquette, comportement du pilote quand 90 étiquettes partent d'affilée, lecture de vos vrais fichiers Excel et Word) : les tests automatiques vérifient la lecture des listes, le dessin des étiquettes et le déroulement d'une série, pas le papier qui sort. La partie impression est la plus délicate (chaque pilote nomme ses formats de papier à sa façon). **Imprimez d'abord 2 ou 3 étiquettes** et comparez-les à celles de P-touch Editor avant de lancer toute la série. Si quelque chose ne va pas, voir [Si l'impression ne va pas](#si-limpression-ne-va-pas) : un réglage dans un petit fichier texte suffit en général.
 
 ## Sommaire
 
-- [Récupérer BarcodeTray.exe](#récupérer-barcodetrayexe)
+- [Récupérer POGs Industries Labels v3.exe](#récupérer-pogs-industries-labels-v3exe)
 - [Premier lancement](#premier-lancement)
+- [Remplacer l'ancienne version](#remplacer-lancienne-version)
 - [Utilisation au quotidien](#utilisation-au-quotidien)
 - [Étiquettes en série (plans de châssis)](#étiquettes-en-série-plans-de-châssis)
 - [Codes-barres en série (liste)](#codes-barres-en-série-liste)
@@ -26,40 +29,55 @@ Un seul fichier, **`BarcodeTray.exe`** : pas d'installation, pas de droits admin
 - [Désinstaller](#désinstaller)
 - [Pour les développeurs](#pour-les-développeurs)
 
-## Récupérer BarcodeTray.exe
+## Récupérer POGs Industries Labels v3.exe
 
-Le programme est compilé automatiquement par GitHub (workflow *BarcodeTray*, dans ce dépôt).
+Le programme est compilé automatiquement par GitHub (workflow *POG's Industries Labels v3*, dans ce dépôt).
 
 **Option 1 - artefact d'un lancement du workflow** (nécessite d'être connecté à GitHub) :
 
 1. Ouvrir <https://github.com/AngelMINSKATJA/AngelMINSKATJA/actions/workflows/barcode-tray.yml>.
 2. Cliquer sur le lancement le plus récent portant une coche verte.
-3. En bas de la page, section **Artifacts**, télécharger **`BarcodeTray-win-x64`** (c'est un fichier .zip qui contient `BarcodeTray.exe`).
-4. Extraire `BarcodeTray.exe` dans un dossier de votre choix (par exemple `C:\Users\<vous>\BarcodeTray\`) : c'est tout.
+3. En bas de la page, section **Artifacts**, télécharger **`POGs-Industries-Labels-v3-win-x64`** (c'est un fichier .zip qui contient `POGs Industries Labels v3.exe`).
+4. Extraire `POGs Industries Labels v3.exe` dans un dossier de votre choix (par exemple `C:\Users\<vous>\POGs Industries Labels v3\`) : c'est tout. Ne le lancez pas directement depuis le .zip ouvert dans l'Explorateur : extrayez-le d'abord.
 
-Les artefacts sont conservés 90 jours. Pour en obtenir un nouveau : onglet **Actions**, workflow **BarcodeTray**, bouton **Run workflow** (ce bouton n'apparaît que lorsque le fichier du workflow est présent sur la branche principale du dépôt).
+Les artefacts sont conservés 90 jours. Pour en obtenir un nouveau : onglet **Actions**, workflow **POG's Industries Labels v3**, bouton **Run workflow** (ce bouton n'apparaît que lorsque le fichier du workflow est présent sur la branche principale du dépôt).
 
 **Option 2 - Release GitHub (conservée sans limite de durée, téléchargeable sans compte)** :
 
 1. Vérifier que le dossier `BarcodeTray` et le workflow sont bien **sur la branche principale (`main`) du dépôt** (fusionner d'abord la demande de modification, *pull request*, qui les contient). Une étiquette créée avant n'a rien à compiler : la Release resterait vide, sans message d'erreur.
 2. Sur la page du dépôt, cliquer sur **Releases**, puis **Draft a new release**.
-3. Dans **Choose a tag**, taper `barcodetray-v1.0.0` (le nom doit commencer par `barcodetray-v`), puis choisir **Create new tag on publish** ; laisser la cible sur `main`.
+3. Dans **Choose a tag**, taper `pogs-labels-v3.0.0` (le nom doit commencer par `pogs-labels-v` ; l'ancien préfixe `barcodetray-v` fonctionne toujours), puis choisir **Create new tag on publish** ; laisser la cible sur `main`.
 4. Cliquer sur **Publish release**.
-5. **Patienter environ 10 minutes** (le temps des tests et de la compilation, visible dans l'onglet *Actions*), puis recharger la page : `BarcodeTray.exe` et son empreinte `BarcodeTray.exe.sha256` apparaissent sous **Assets**. Avant cela, la Release est publiée mais vide.
+5. **Patienter environ 10 minutes** (le temps des tests et de la compilation, visible dans l'onglet *Actions*), puis recharger la page : `POGs Industries Labels v3.exe` et son empreinte `POGs Industries Labels v3.exe.sha256` apparaissent sous **Assets**. Avant cela, la Release est publiée mais vide. (GitHub peut afficher le nom du fichier avec des points à la place des espaces, `POGs.Industries.Labels.v3.exe` : c'est le même fichier, et son nom n'a aucune importance pour le fonctionnement, vous pouvez le renommer.)
 
 (Si l'étiquette est créée en ligne de commande avec `git tag` puis `git push`, le workflow crée lui-même la Release, avec l'empreinte SHA-256 dans la description.)
 
 **Si le navigateur affiche « n'est pas couramment téléchargé »** (Edge, Chrome : le fichier n'est pas signé), choisir **Conserver**, puis **Conserver quand même**.
 
-**Si Windows bloque le fichier** (voir aussi plus bas) : clic droit sur `BarcodeTray.exe`, **Propriétés**, cocher **Débloquer** en bas de l'onglet *Général*, puis OK.
+**Si Windows bloque le fichier** (voir aussi plus bas) : clic droit sur `POGs Industries Labels v3.exe`, **Propriétés**, cocher **Débloquer** en bas de l'onglet *Général*, puis OK.
 
 ## Premier lancement
 
-1. Double-cliquer sur `BarcodeTray.exe`. Le premier démarrage prend quelques secondes (le programme dépose quelques composants dans le dossier temporaire de Windows) ; les suivants sont immédiats.
+1. Double-cliquer sur `POGs Industries Labels v3.exe`. Le premier démarrage prend quelques secondes (le programme dépose quelques composants dans le dossier temporaire de Windows) ; les suivants sont immédiats.
 2. **Windows SmartScreen** peut afficher « Windows a protégé votre ordinateur » : le fichier n'est pas signé numériquement (une signature coûte plusieurs centaines d'euros par an). Cliquer sur **Plus d'infos**, puis sur **Exécuter quand même**.
-3. Sur un **ordinateur d'entreprise**, l'antivirus ou une stratégie de sécurité (AppLocker, liste blanche de programmes) peut bloquer un programme inconnu. Dans ce cas il faut demander au service informatique d'autoriser `BarcodeTray.exe` ; le programme n'a besoin d'aucun droit administrateur et n'écrit que dans votre profil utilisateur.
+3. Sur un **ordinateur d'entreprise**, l'antivirus ou une stratégie de sécurité (AppLocker, liste blanche de programmes) peut bloquer un programme inconnu. Dans ce cas il faut demander au service informatique d'autoriser `POGs Industries Labels v3.exe` ; le programme n'a besoin d'aucun droit administrateur et n'écrit que dans votre profil utilisateur.
 4. La fenêtre s'ouvre. **Au tout premier lancement, le programme s'ajoute au démarrage de Windows** (case « Lancer au démarrage de Windows »). Décochez-la si vous ne le souhaitez pas. Si vous désactivez le programme dans le Gestionnaire des tâches (onglet *Démarrage*), la case apparaît décochée ; la cocher à nouveau réactive le démarrage automatique.
 5. Choisissez votre imprimante dans la liste : la **Brother QL-800** est présélectionnée si elle est installée, et votre choix est mémorisé.
+
+## Remplacer l'ancienne version
+
+Le logiciel s'appelle maintenant **POG's Industries Labels v3** (version 3.0) ; il s'appelait « BarcodeTray » (fenêtre « Code-barres Code 128 », fichier `BarcodeTray.exe`). Pour passer de l'ancienne version à celle-ci :
+
+1. **Quitter l'ancienne version** : clic droit sur son icône dans la zone de notification (près de l'horloge ; sous Windows 11, cliquer d'abord sur le « ^ »), puis **Quitter**. C'est indispensable : l'ancienne et la nouvelle version se reconnaissent comme étant « le même programme », donc tant que l'ancienne tourne, la nouvelle ne peut pas démarrer. Si vous la lancez quand même, elle s'en aperçoit : elle affiche le message « Une ancienne version du logiciel (« Code-barres Code 128 », fichier BarcodeTray.exe) est encore ouverte », oriente déjà le démarrage automatique de Windows vers le nouveau fichier (si le démarrage automatique est activé et que le fichier n'est pas dans le .zip ou un dossier temporaire), puis se ferme sans rien afficher d'autre. Il suffit alors de quitter l'ancienne version comme ci-dessus et de relancer la nouvelle.
+2. **Remplacer ou ajouter le fichier** : copier `POGs Industries Labels v3.exe` dans un dossier permanent (par exemple à côté de l'ancien `BarcodeTray.exe`), puis le **double-cliquer**. Le premier démarrage prend quelques secondes, comme la toute première fois.
+3. **Lancer la nouvelle version au moins une fois avant de supprimer l'ancien fichier** `BarcodeTray.exe` (que vous pouvez ensuite supprimer).
+
+**Ce qui est conservé, sans rien faire :**
+
+- **Le démarrage automatique** : au premier lancement, la nouvelle version réécrit toute seule l'entrée de démarrage de Windows pour qu'elle pointe vers `POGs Industries Labels v3.exe` (la même entrée, il n'y en a donc pas deux). Si vous aviez décoché « Lancer au démarrage de Windows » (ou désactivé le programme dans le Gestionnaire des tâches), ce choix est respecté. Si la nouvelle version est lancée depuis le .zip ou un dossier temporaire, cette mise à jour est reportée : copiez d'abord le fichier dans un dossier permanent.
+- **Vos réglages, l'imprimante choisie et le journal** : les dossiers `%APPDATA%\BarcodeTray` et `%LOCALAPPDATA%\BarcodeTray` gardent leur ancien nom technique, la nouvelle version les retrouve tels quels.
+
+**Ce qui change :** le titre des fenêtres, l'info-bulle de l'icône, le nom du travail dans la file d'impression de Windows, l'en-tête du diagnostic d'impression, et le nom que Windows affiche pour le programme dans le Gestionnaire des tâches (onglet *Démarrage*) et dans *Paramètres, Applications, Démarrage* : **POG's Industries Labels v3**, version 3.0. Windows 11 peut considérer l'icône comme nouvelle et la ranger dans le menu « ^ » : voir le conseil dans [Utilisation au quotidien](#utilisation-au-quotidien).
 
 ## Utilisation au quotidien
 
@@ -73,8 +91,8 @@ Les artefacts sont conservés 90 jours. Pour en obtenir un nouveau : onglet **Ac
   - **Lancer au démarrage de Windows** (case à cocher) ;
   - **Copier le diagnostic d'impression** (voir plus bas) ;
   - **Quitter** (la façon normale d'arrêter le programme ; « Fin de tâche » dans le Gestionnaire des tâches l'arrête aussi).
-- **Windows 11** range souvent les nouvelles icônes dans le menu « ^ » (icônes masquées) de la barre des tâches. Pour la garder visible : la faire glisser vers la barre des tâches, ou **Paramètres, Personnalisation, Barre des tâches, Autres icônes de la barre d'état système**, puis activer BarcodeTray.
-- Relancer `BarcodeTray.exe` alors qu'il tourne déjà ne crée pas de seconde copie : cela affiche simplement la fenêtre existante.
+- **Windows 11** range souvent les nouvelles icônes dans le menu « ^ » (icônes masquées) de la barre des tâches. Pour la garder visible : la faire glisser vers la barre des tâches, ou **Paramètres, Personnalisation, Barre des tâches, Autres icônes de la barre d'état système**, puis activer **POG's Industries Labels v3**.
+- Relancer `POGs Industries Labels v3.exe` alors qu'il tourne déjà ne crée pas de seconde copie : cela affiche simplement la fenêtre existante.
 
 **Lisibilité selon la longueur du texte.** L'étiquette fait 62 mm de ruban, soit environ 58,9 mm imprimables (696 points à 300 dpi). Le programme prend les barres les plus larges qui tiennent : avec un texte court (jusqu'à environ 15 caractères, ou 30 chiffres) la barre la plus fine fait 3 points (0,25 mm) ; jusqu'à environ 26 caractères (52 chiffres) 2 points ; jusqu'à environ 58 caractères (116 chiffres) 1 point (0,085 mm), ce qui est très fin : le programme l'indique alors en orange (« barres très fines, la lecture peut échouer ») et il faut vérifier avec votre lecteur, ou raccourcir le texte. Au-delà, l'image dépasse la largeur du ruban et est réduite à l'impression : à éviter. Le texte lisible sous les barres reste complet : quand il est plus large que les barres, l'image est élargie (jusqu'à 696 points, la largeur du ruban) et les barres restent centrées.
 
@@ -87,7 +105,7 @@ Pour imprimer d'un coup toutes les étiquettes d'un tableau Excel, par exemple l
 - clic droit sur l'icône de la zone de notification, puis **Étiquettes en série (tableau Excel)…** ;
 - ou le lien **Étiquettes en série…** tout en bas de la fenêtre principale.
 
-La fenêtre s'appelle **Étiquettes en série — plans de châssis**. Comme la fenêtre principale, la fermer (croix, Échap) la masque seulement : elle garde sa liste tant que le programme tourne et se rouvre au même endroit. Elle peut être agrandie à la souris.
+La fenêtre s'appelle **Étiquettes en série — plans de châssis — POG's Industries Labels v3**. Comme la fenêtre principale, la fermer (croix, Échap) la masque seulement : elle garde sa liste tant que le programme tourne et se rouvre au même endroit. Elle peut être agrandie à la souris.
 
 ### 1. Copier le tableau dans Excel
 
@@ -175,7 +193,7 @@ Pour fabriquer et imprimer **plusieurs codes-barres d'un seul coup** (référenc
 - clic droit sur l'icône de la zone de notification, puis **Codes-barres en série (liste)…** ;
 - ou le lien **Codes-barres en série…** tout en bas à droite de la fenêtre principale, sur la même ligne que **Étiquettes en série…**.
 
-La fenêtre s'appelle **Codes-barres en série**. Comme les autres, la fermer (croix, Échap) la masque seulement : elle garde sa liste tant que le programme tourne. Elle peut être agrandie à la souris.
+La fenêtre s'appelle **Codes-barres en série — POG's Industries Labels v3**. Comme les autres, la fermer (croix, Échap) la masque seulement : elle garde sa liste tant que le programme tourne. Elle peut être agrandie à la souris.
 
 ### 1. Préparer la liste
 
@@ -348,8 +366,8 @@ Exemple :
 |---|---|
 | `%APPDATA%\BarcodeTray\settings.json` | Vos réglages (et, seulement si le fichier a été abîmé, des copies `settings.json.invalide*`). |
 | `%LOCALAPPDATA%\BarcodeTray\barcodetray.log` | Journal technique (environ 256 Ko au maximum, l'ancien est gardé dans `barcodetray.log.1`). Ne contient jamais le texte des codes-barres. |
-| `%TEMP%\.net\BarcodeTray\...` | Quelques composants .NET extraits au premier démarrage. Peut être supprimé sans risque (il sera recréé). |
-| Registre : `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`, valeur `BarcodeTray` | Lancement au démarrage de Windows (uniquement pour votre compte, aucun droit administrateur). |
+| `%TEMP%\.net\POGs Industries Labels v3\...` | Quelques composants .NET extraits au premier démarrage (le dossier porte le nom du fichier .exe ; pour l'ancienne version : `%TEMP%\.net\BarcodeTray\...`). Peut être supprimé sans risque (il sera recréé). |
+| Registre : `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`, valeur `BarcodeTray` | Lancement au démarrage de Windows (uniquement pour votre compte, aucun droit administrateur). Le nom de la valeur est resté `BarcodeTray` pour que le remplacement de l'ancienne version se fasse sans doublon. |
 
 Si le programme refuse de démarrer sans rien afficher : vérifier que le dossier temporaire est accessible en écriture ; à défaut, définir la variable d'environnement utilisateur `DOTNET_BUNDLE_EXTRACT_BASE_DIR` vers un dossier où vous pouvez écrire.
 
@@ -357,8 +375,8 @@ Si le programme refuse de démarrer sans rien afficher : vérifier que le dossie
 
 1. Décocher **Lancer au démarrage de Windows** (fenêtre du programme ou menu de l'icône).
 2. Clic droit sur l'icône, **Quitter**.
-3. Supprimer `BarcodeTray.exe`.
-4. Facultatif : supprimer les dossiers `%APPDATA%\BarcodeTray`, `%LOCALAPPDATA%\BarcodeTray` et `%TEMP%\.net\BarcodeTray`.
+3. Supprimer `POGs Industries Labels v3.exe` (et l'ancien `BarcodeTray.exe` s'il traîne encore).
+4. Facultatif : supprimer les dossiers `%APPDATA%\BarcodeTray`, `%LOCALAPPDATA%\BarcodeTray`, `%TEMP%\.net\POGs Industries Labels v3` et `%TEMP%\.net\BarcodeTray`.
 
 Il n'y a rien d'autre : pas d'installateur, pas de service, pas de pilote.
 
@@ -369,7 +387,7 @@ Structure (dossier `BarcodeTray/` de ce dépôt) :
 | Chemin | Contenu |
 |---|---|
 | `src/Code128/` | Encodeur Code 128 (.NET 8, aucune dépendance), encodage optimal sur les jeux A, B et C. |
-| `src/BarcodeTray/` | Application Windows Forms (C# 12, .NET 8), aucune dépendance NuGet. Les fenêtres de série : `BatchForm` / `BatchLogic` (étiquettes de plans) et `BarcodeBatchForm` / `BarcodeBatchLogic` (codes-barres d'une liste ; `ListFileReader` lit les `.txt`, `.csv`, `.xlsx` et `.docx` avec `System.IO.Compression` et `System.Xml` seulement). |
+| `src/BarcodeTray/` | Application Windows Forms (C# 12, .NET 8), aucune dépendance NuGet. Le nom affiché du logiciel (« POG's Industries Labels v3 ») et le nom du fichier sont dans `AppInfo.cs` et dans le `.csproj` (`AssemblyName`, `AssemblyTitle`, `Product`, `Version`) ; le dossier, l'espace de noms et le nom du projet restent « BarcodeTray ». Les fenêtres de série : `BatchForm` / `BatchLogic` (étiquettes de plans) et `BarcodeBatchForm` / `BarcodeBatchLogic` (codes-barres d'une liste ; `ListFileReader` lit les `.txt`, `.csv`, `.xlsx` et `.docx` avec `System.IO.Compression` et `System.Xml` seulement). |
 | `tests/Code128.Tests/` | Tests de l'encodeur (xUnit, tournent sous Linux et Windows ; ZXing.Net sert de décodeur indépendant). |
 | `tests/BarcodeTray.Tests/` | Tests de l'application (xUnit, Windows uniquement : dessin GDI+, presse-papier, registre...). |
 | `tools/make_icon.py` | Génère `src/BarcodeTray/Assets/app.ico` (Python, bibliothèque standard seulement). |
@@ -380,11 +398,13 @@ Commandes (SDK .NET 8 ; les projets Windows nécessitent Windows) :
 ```powershell
 dotnet test tests/Code128.Tests                      # n'importe quel système
 dotnet test tests/BarcodeTray.Tests -c Release       # Windows
-dotnet publish src/BarcodeTray -c Release -o publish # Windows : publish\BarcodeTray.exe (fichier unique autonome)
+dotnet publish src/BarcodeTray -c Release -o publish # Windows : publish\POGs Industries Labels v3.exe (fichier unique autonome)
 ```
+
+Pour renommer le logiciel : changer `AppInfo.cs`, `AssemblyName` / `AssemblyTitle` / `Product` / `Version` dans `src/BarcodeTray/BarcodeTray.csproj` et les variables `EXE_NAME` / `ARTIFACT_NAME` du workflow (des tests et une étape du workflow vérifient que tout est cohérent). **Ne pas** renommer, sous peine de faire perdre réglages et démarrage automatique : les dossiers `%APPDATA%\BarcodeTray` et `%LOCALAPPDATA%\BarcodeTray`, la valeur de registre `BarcodeTray` (démarrage automatique) et les noms du mutex et de l'événement « une seule instance » (`Local\BarcodeTray.SingleInstance`, `Local\BarcodeTray.Show`).
 
 La publication est paramétrée dans `src/BarcodeTray/BarcodeTray.csproj` : win-x64, autonome, fichier unique compressé, ReadyToRun, `InvariantGlobalization`, manifeste `asInvoker` (jamais d'élévation). Les symboles de débogage sont intégrés à l'exécutable, ce qui donne des numéros de ligne dans le journal en cas d'erreur.
 
 Options de ligne de commande : `--tray` (démarre masqué dans la zone de notification ; utilisé par le démarrage automatique), `--selftest sortie.png` (sans interface : génère un code-barres d'exemple et l'enregistre ; utilisé par l'intégration continue pour prouver que l'exécutable publié démarre) et `--selftest-label sortie.png` (sans interface : dessine l'étiquette d'exemple « HB1 » / « 22062 » de 62 x 40 mm, vérifie que le texte est bien dans la zone imprimable de la QL-800 et l'enregistre en PNG de 732 x 471 points).
 
-Le workflow GitHub Actions exécute les tests Code128 (Linux), les tests de l'application (Windows), publie l'exécutable, vérifie que le dossier de publication ne contient **que** `BarcodeTray.exe`, lance `--selftest` puis `--selftest-label` (dimensions du PNG de l'étiquette en série), démarre brièvement `--tray` (avertissement si le processus s'arrête, si une fenêtre ou une boîte d'erreur s'ouvre, ou si le journal contient une erreur), puis archive l'exécutable (`BarcodeTray-win-x64`, 90 jours). Un tag `barcodetray-v*` crée en plus une Release GitHub (avec `BarcodeTray.exe` et `BarcodeTray.exe.sha256`).
+Le workflow GitHub Actions exécute les tests Code128 (Linux), les tests de l'application (Windows), publie l'exécutable, vérifie que le dossier de publication ne contient **que** `POGs Industries Labels v3.exe` et que Windows y lira bien le nom « POG's Industries Labels v3 » (version 3.0), lance `--selftest` puis `--selftest-label` (dimensions du PNG de l'étiquette en série), démarre brièvement `--tray` (avertissement si le processus s'arrête, si une fenêtre ou une boîte d'erreur s'ouvre, ou si le journal contient une erreur), puis archive l'exécutable (`POGs-Industries-Labels-v3-win-x64`, 90 jours). Un tag `pogs-labels-v*` (ou `barcodetray-v*`) crée en plus une Release GitHub (avec `POGs Industries Labels v3.exe` et `POGs Industries Labels v3.exe.sha256`).

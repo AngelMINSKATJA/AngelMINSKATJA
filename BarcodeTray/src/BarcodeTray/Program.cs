@@ -21,6 +21,7 @@ internal static class Program
     // Champs statiques : ils doivent rester référencés pendant toute la vie du processus,
     // sinon le ramasse-miettes libérerait le Mutex et la protection « une seule instance » disparaîtrait.
     private static Mutex? _singleInstanceMutex;
+    private static Mutex? _runningMarker;
     private static EventWaitHandle? _showEvent;
 
     private static bool _inErrorDialog;
@@ -67,14 +68,12 @@ internal static class Program
         OpenShowEvent();
         if (!TryBecomeFirstInstance())
         {
-            if (!startInTray)
-            {
-                SignalFirstInstance();
-            }
-
-            Log.Info("Une instance est déjà active : fermeture de celle-ci.");
-            return 0;
+            return HandleSecondInstance(startInTray);
         }
+
+        // Marqueur « version 3 ou plus récente » (voir InstanceHandoff), créé tout de suite après le mutex : une ancienne
+        // version ne le crée pas, ce qui permet à un programme lancé plus tard de la reconnaître.
+        _runningMarker = InstanceHandoff.CreateMarker(InstanceHandoff.RunningMarkerName);
 
         // 2) Réglages et premier lancement.
         AppSettings settings = AppSettings.Load();
@@ -121,6 +120,7 @@ internal static class Program
 
         Log.Info("Arrêt normal.");
         GC.KeepAlive(_singleInstanceMutex);
+        GC.KeepAlive(_runningMarker);
         GC.KeepAlive(_showEvent);
         return 0;
     }
@@ -307,6 +307,49 @@ internal static class Program
             // Mieux vaut risquer deux instances que de ne pas démarrer du tout.
             Log.Error("Création du mutex impossible : démarrage sans protection d'instance unique.", ex);
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Une autre instance est déjà active dans cette session. Instance de cette version : on lui demande d'afficher sa fenêtre
+    /// (sauf au démarrage automatique). ANCIENNE version (premier lancement du nouvel exécutable alors que l'ancien tourne,
+    /// cas normal puisqu'il démarre avec Windows) : on ne réveille pas sa fenêtre, on redirige le démarrage automatique vers
+    /// cet exécutable et on explique quoi faire.
+    /// </summary>
+    private static int HandleSecondInstance(bool startInTray)
+    {
+        SecondInstanceAction action = InstanceHandoff.Decide(
+            startInTray,
+            () => InstanceHandoff.IsMarkerPresent(InstanceHandoff.RunningMarkerName, InstanceHandoff.ProbeAttempts, InstanceHandoff.ProbePauseMs));
+
+        switch (action)
+        {
+            case SecondInstanceAction.ShowRunningWindow:
+                SignalFirstInstance();
+                break;
+
+            case SecondInstanceAction.ExplainOlderVersion:
+                Log.Warn("Une ancienne version du programme est déjà active : démarrage automatique redirigé vers cet exécutable, "
+                         + "message affiché, fermeture de celle-ci.");
+                StartupRegistration.EnsurePathCurrent(); // sans effet si le démarrage automatique est désactivé ou si l'exe est dans un dossier temporaire
+                ShowOlderVersionNotice();
+                return 0;
+        }
+
+        Log.Info("Une instance est déjà active : fermeture de celle-ci.");
+        return 0;
+    }
+
+    private static void ShowOlderVersionNotice()
+    {
+        try
+        {
+            Application.EnableVisualStyles();
+            MessageBox.Show(InstanceHandoff.OlderVersionMessage(), AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("Message « ancienne version » impossible à afficher : " + ex.Message);
         }
     }
 

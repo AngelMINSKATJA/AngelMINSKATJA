@@ -86,6 +86,19 @@ public class AppIdentityTests
         Assert.Equal(@"Local\BarcodeTray.Show", ReadProgramConstant("ShowEventName"));
     }
 
+    [Fact]
+    public void TheVersion3Marker_IsDistinctFromTheOldSingleInstanceNames()
+    {
+        // Le marqueur sert à reconnaître l'ANCIENNE version (qui ne le crée pas) : il ne doit jamais coïncider avec le mutex
+        // ou l'événement partagés avec elle.
+        string mutexName = ReadProgramConstant("MutexName");
+        string eventName = ReadProgramConstant("ShowEventName");
+
+        Assert.NotEqual(InstanceHandoff.RunningMarkerName, mutexName);
+        Assert.NotEqual(InstanceHandoff.RunningMarkerName, eventName);
+        Assert.NotEqual(mutexName, eventName);
+    }
+
     private static string ReadProgramConstant(string name)
     {
         Type? program = App.GetType("BarcodeTray.Program");

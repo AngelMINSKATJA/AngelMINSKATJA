@@ -1,9 +1,15 @@
-name: BarcodeTray
+name: "POG's Industries Labels v3"
 
-# Compile, teste et publie BarcodeTray (dossier BarcodeTray/ de ce dépôt).
+# Compile, teste et publie POG's Industries Labels v3 (dossier BarcodeTray/ de ce dépôt : le nom technique du projet,
+# des dossiers de sources et du workflow reste « BarcodeTray »).
 #   - core-tests    : tests de la bibliothèque Code 128 (Linux)
-#   - windows-build : tests de l'application + exécutable unique BarcodeTray.exe (artefact "BarcodeTray-win-x64")
-#   - release       : uniquement sur un tag "barcodetray-v*" (ex. barcodetray-v1.0.0) : crée une Release GitHub avec l'exe
+#   - windows-build : tests de l'application + exécutable unique "POGs Industries Labels v3.exe"
+#                     (artefact "POGs-Industries-Labels-v3-win-x64")
+#   - release       : uniquement sur un tag "barcodetray-v*" ou "pogs-labels-v*" (ex. pogs-labels-v3.0.0) : crée une Release
+#                     GitHub avec l'exe
+#
+# ATTENTION : le nom du fichier .exe contient des ESPACES. Chaque chemin est donc construit avec Join-Path / une variable
+# et toujours entre guillemets (pwsh et bash).
 
 on:
   push:
@@ -11,6 +17,7 @@ on:
       - '**'
     tags:
       - 'barcodetray-v*'
+      - 'pogs-labels-v*'
     paths:
       - 'BarcodeTray/**'
       - '.github/workflows/barcode-tray.yml'
@@ -31,6 +38,11 @@ env:
   DOTNET_NOLOGO: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+  # Nom du logiciel et de ses fichiers. EXE_NAME doit rester égal à AssemblyName (BarcodeTray.csproj) + ".exe" et à
+  # AppInfo.FileBaseName (src/BarcodeTray/AppInfo.cs) : l'étape « Vérifier que le dossier publish... » le contrôle.
+  PRODUCT_NAME: "POG's Industries Labels"
+  EXE_NAME: "POGs Industries Labels v3.exe"
+  ARTIFACT_NAME: "POGs-Industries-Labels-v3-win-x64"
 
 jobs:
   core-tests:
@@ -84,8 +96,9 @@ jobs:
       - name: Publier l'exécutable unique (win-x64, autonome)
         run: dotnet publish src/BarcodeTray -c Release -o publish
 
-      - name: Vérifier que le dossier publish ne contient que BarcodeTray.exe
+      - name: Vérifier que le dossier publish ne contient que « POGs Industries Labels v3.exe »
         run: |
+          $exeName = $env:EXE_NAME
           $root = (Resolve-Path publish).Path
           $files = @(Get-ChildItem -Path $root -Force -Recurse | Where-Object { -not $_.PSIsContainer })
           Write-Host "Contenu de ${root} :"
@@ -94,9 +107,9 @@ jobs:
             Write-Host ('  {0,14:N0} octets  {1}' -f $f.Length, $relative)
           }
 
-          $exe = @($files | Where-Object { $_.Name -eq 'BarcodeTray.exe' -and $_.DirectoryName -eq $root })
+          $exe = @($files | Where-Object { $_.Name -eq $exeName -and $_.DirectoryName -eq $root })
           if ($exe.Count -ne 1) {
-            Write-Host "::error title=Publication::BarcodeTray.exe est absent du dossier publish."
+            Write-Host "::error title=Publication::${exeName} est absent du dossier publish (nom attendu exactement : ${exeName}). Le AssemblyName du fichier .csproj a-t-il changé ?"
             exit 1
           }
 
@@ -108,16 +121,39 @@ jobs:
           }
 
           $sizeMb = [math]::Round($exe[0].Length / 1MB, 1)
-          Write-Host "BarcodeTray.exe : ${sizeMb} Mo ($($exe[0].Length) octets)"
+          Write-Host "${exeName} : ${sizeMb} Mo ($($exe[0].Length) octets)"
           if ($exe[0].Length -lt 20MB) {
-            Write-Host "::error title=Publication::BarcodeTray.exe fait seulement ${sizeMb} Mo : le runtime .NET ne semble pas inclus (exécutable non autonome)."
+            Write-Host "::error title=Publication::${exeName} fait seulement ${sizeMb} Mo : le runtime .NET ne semble pas inclus (exécutable non autonome)."
             exit 1
           }
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "BarcodeTray.exe : **${sizeMb} Mo**, fichier unique autonome (win-x64)."
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "${exeName} : **${sizeMb} Mo**, fichier unique autonome (win-x64)."
+
+      # Ce que Windows affiche dans le Gestionnaire des tâches (onglet Démarrage) et dans Paramètres > Applications >
+      # Démarrage : la « Description du fichier » de l'exécutable, avec la version 3.0.
+      - name: Vérifier les informations du fichier (nom affiché par Windows, version)
+        run: |
+          $exePath = Join-Path (Join-Path (Get-Location).Path 'publish') $env:EXE_NAME
+          $info = (Get-Item -LiteralPath $exePath).VersionInfo
+          Write-Host "Description du fichier : $($info.FileDescription)"
+          Write-Host "Nom du produit         : $($info.ProductName)"
+          Write-Host "Société                : $($info.CompanyName)"
+          Write-Host "Version du fichier     : $($info.FileVersion)"
+          Write-Host "Version du produit     : $($info.ProductVersion)"
+          $expectedTitle = "POG's Industries Labels v3"
+          $problems = @()
+          if ($info.FileDescription -ne $expectedTitle) { $problems += "Description du fichier '$($info.FileDescription)' au lieu de '${expectedTitle}'" }
+          if ($info.ProductName -ne $env:PRODUCT_NAME) { $problems += "Nom du produit '$($info.ProductName)' au lieu de '$($env:PRODUCT_NAME)'" }
+          if (-not "$($info.FileVersion)".StartsWith('3.0.')) { $problems += "Version du fichier '$($info.FileVersion)' au lieu de 3.0.x" }
+          if ($problems.Count -gt 0) {
+            Write-Host "::error title=Informations du fichier::$($problems -join ' ; ')"
+            exit 1
+          }
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Informations du fichier : **$($info.FileDescription)**, version $($info.FileVersion)."
 
       - name: Auto-test de l'exécutable publié (--selftest)
         run: |
-          $exe = Join-Path (Get-Location).Path 'publish\BarcodeTray.exe'
+          $exeName = $env:EXE_NAME
+          $exe = Join-Path (Join-Path (Get-Location).Path 'publish') $exeName
           $png = Join-Path (Get-Location).Path 'selftest-out.png'
           if (Test-Path $png) { Remove-Item $png -Force }
 
@@ -126,13 +162,13 @@ jobs:
           $null = $p.Handle
           if (-not $p.WaitForExit(120000)) {
             try { $p.Kill() } catch { }
-            Write-Host "::error title=Auto-test::BarcodeTray.exe --selftest n'a pas terminé en 120 s."
+            Write-Host "::error title=Auto-test::${exeName} --selftest n'a pas terminé en 120 s."
             exit 1
           }
           $p.WaitForExit()
           Write-Host "Code de sortie : $($p.ExitCode)"
           if ($p.ExitCode -ne 0) {
-            Write-Host "::error title=Auto-test::BarcodeTray.exe --selftest a échoué (code $($p.ExitCode))."
+            Write-Host "::error title=Auto-test::${exeName} --selftest a échoué (code $($p.ExitCode))."
             exit 1
           }
 
@@ -166,7 +202,8 @@ jobs:
 
       - name: Auto-test de l'étiquette en série (--selftest-label)
         run: |
-          $exe = Join-Path (Get-Location).Path 'publish\BarcodeTray.exe'
+          $exeName = $env:EXE_NAME
+          $exe = Join-Path (Join-Path (Get-Location).Path 'publish') $exeName
           $png = Join-Path (Get-Location).Path 'selftest-label-out.png'
           if (Test-Path $png) { Remove-Item $png -Force }
 
@@ -175,13 +212,13 @@ jobs:
           $null = $p.Handle
           if (-not $p.WaitForExit(120000)) {
             try { $p.Kill() } catch { }
-            Write-Host "::error title=Auto-test étiquette::BarcodeTray.exe --selftest-label n'a pas terminé en 120 s."
+            Write-Host "::error title=Auto-test étiquette::${exeName} --selftest-label n'a pas terminé en 120 s."
             exit 1
           }
           $p.WaitForExit()
           Write-Host "Code de sortie : $($p.ExitCode)"
           if ($p.ExitCode -ne 0) {
-            Write-Host "::error title=Auto-test étiquette::BarcodeTray.exe --selftest-label a échoué (code $($p.ExitCode))."
+            Write-Host "::error title=Auto-test étiquette::${exeName} --selftest-label a échoué (code $($p.ExitCode))."
             exit 1
           }
 
@@ -219,7 +256,8 @@ jobs:
       - name: Lancement de contrôle en mode zone de notification (--tray, 6 s)
         continue-on-error: true
         run: |
-          $exe = Join-Path (Get-Location).Path 'publish\BarcodeTray.exe'
+          $exeName = $env:EXE_NAME
+          $exe = Join-Path (Join-Path (Get-Location).Path 'publish') $exeName
           $logDir = Join-Path $env:LOCALAPPDATA 'BarcodeTray'
           $log = Join-Path $logDir 'barcodetray.log'
 
@@ -237,7 +275,7 @@ jobs:
             Start-Sleep -Seconds 6
             $p.Refresh()
             if ($p.HasExited) {
-              Write-Host "::warning title=Lancement --tray::le processus BarcodeTray.exe s'est arrêté avant 6 s (code de sortie $($p.ExitCode)). Ce contrôle ne fait pas échouer la construction, mais l'application devrait rester ouverte dans la zone de notification : voir le journal ci-dessous."
+              Write-Host "::warning title=Lancement --tray::le processus ${exeName} s'est arrêté avant 6 s (code de sortie $($p.ExitCode)). Ce contrôle ne fait pas échouer la construction, mais l'application devrait rester ouverte dans la zone de notification : voir le journal ci-dessous."
               $failed = $true
             }
             elseif ($p.MainWindowHandle -ne [IntPtr]::Zero) {
@@ -283,11 +321,11 @@ jobs:
             Write-Host "Aucun journal trouvé ($log)."
           }
 
-      - name: Archiver l'exécutable (artefact BarcodeTray-win-x64)
+      - name: Archiver l'exécutable (artefact POGs-Industries-Labels-v3-win-x64)
         uses: actions/upload-artifact@v4
         with:
-          name: BarcodeTray-win-x64
-          path: BarcodeTray/publish/BarcodeTray.exe
+          name: ${{ env.ARTIFACT_NAME }}
+          path: BarcodeTray/publish/${{ env.EXE_NAME }}
           if-no-files-found: error
           retention-days: 90
 
@@ -308,12 +346,12 @@ jobs:
       - name: Bilan des tests de l'application
         if: steps.app_tests.outcome == 'failure'
         run: |
-          Write-Host "::error title=Tests::des tests de l'application ont échoué (voir l'étape « Tests de l'application (Windows) »). L'exécutable a quand même été archivé (artefact BarcodeTray-win-x64), mais ne le considérez pas comme vérifié."
+          Write-Host "::error title=Tests::des tests de l'application ont échoué (voir l'étape « Tests de l'application (Windows) »). L'exécutable a quand même été archivé (artefact POGs-Industries-Labels-v3-win-x64), mais ne le considérez pas comme vérifié."
           exit 1
 
   release:
     name: Publier une Release GitHub
-    if: startsWith(github.ref, 'refs/tags/barcodetray-v')
+    if: startsWith(github.ref, 'refs/tags/barcodetray-v') || startsWith(github.ref, 'refs/tags/pogs-labels-v')
     needs:
       - core-tests
       - windows-build
@@ -325,7 +363,7 @@ jobs:
       - name: Télécharger l'exécutable
         uses: actions/download-artifact@v4
         with:
-          name: BarcodeTray-win-x64
+          name: ${{ env.ARTIFACT_NAME }}
           path: dist
 
       - name: Créer (ou mettre à jour) la Release
@@ -335,20 +373,37 @@ jobs:
         run: |
           set -euo pipefail
           ls -l dist
-          sha256=$(sha256sum dist/BarcodeTray.exe | cut -d ' ' -f 1)
+
+          # Le nom du fichier contient des espaces : tous les chemins sont entre guillemets.
+          exe="dist/${EXE_NAME}"
+          if [ ! -f "$exe" ]; then
+            echo "::error title=Release::${EXE_NAME} est absent de l'artefact téléchargé (dossier dist)."
+            exit 1
+          fi
+
+          sha256=$(sha256sum "$exe" | cut -d ' ' -f 1)
           version="${TAG#barcodetray-v}"
+          version="${version#pogs-labels-v}"
+          title="${PRODUCT_NAME} v${version}"
           # Empreinte jointe en fichier : elle est publiée aussi quand la Release a été créée à la main sur le site
           # (dans ce cas les notes ci-dessous ne sont pas utilisées).
-          echo "${sha256}  BarcodeTray.exe" > dist/BarcodeTray.exe.sha256
+          echo "${sha256}  ${EXE_NAME}" > "${exe}.sha256"
           {
-            echo "BarcodeTray ${version} : un seul fichier, BarcodeTray.exe (Windows 64 bits), sans installation."
+            echo "${title} : un seul fichier, ${EXE_NAME} (Windows 64 bits), sans installation."
             echo
             echo "SHA-256 : \`${sha256}\`"
             echo
             echo "Fichier non signé : Windows SmartScreen peut afficher un avertissement (Plus d'infos puis Exécuter quand même). Voir BarcodeTray/README.md."
+            echo
+            echo "Pour remplacer une ancienne version : la quitter d'abord depuis la zone de notification (clic droit sur son icône, Quitter), puis lancer ce fichier. Réglages et démarrage automatique sont conservés. Voir BarcodeTray/README.md."
+            echo
+            echo "GitHub peut afficher le nom du fichier avec des points à la place des espaces (POGs.Industries.Labels.v3.exe) : c'est le même fichier, le nom n'a pas d'importance pour le fonctionnement."
           } > notes.md
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" dist/BarcodeTray.exe dist/BarcodeTray.exe.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" "$exe" "${exe}.sha256" --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" dist/BarcodeTray.exe dist/BarcodeTray.exe.sha256 --repo "$GITHUB_REPOSITORY" --title "BarcodeTray ${version}" --notes-file notes.md --verify-tag
+            gh release create "$TAG" "$exe" "${exe}.sha256" --repo "$GITHUB_REPOSITORY" --title "$title" --notes-file notes.md --verify-tag
           fi
+
+          echo "Fichiers de la Release ${TAG} :"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' || true
