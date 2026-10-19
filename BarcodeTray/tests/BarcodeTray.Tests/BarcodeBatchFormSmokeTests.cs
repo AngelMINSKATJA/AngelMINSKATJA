@@ -199,7 +199,7 @@ public class BarcodeBatchFormSmokeTests
             _ = form.ThumbnailFor(0);
             Assert.Equal(1, form.ThumbnailCount);
 
-            Btn(form, "_btnClear").PerformClick();
+            Click(Btn(form, "_btnClear"));
 
             Assert.Equal(0, form.RowCount);
             Assert.Equal(0, form.Grid.RowCount);
@@ -1639,6 +1639,15 @@ public class BarcodeBatchFormSmokeTests
     }
 
     private static Button Btn(BarcodeBatchForm form, string field) => Field<Button>(form, field);
+
+    /// <summary>
+    /// Déclenche le clic d'un bouton. <c>PerformClick()</c> ne fait RIEN tant que la fenêtre n'a jamais été affichée (le bouton
+    /// n'est alors pas « sélectionnable » : un parent est invisible) ; on appelle donc directement OnClick, qui lève l'événement Click.
+    /// </summary>
+    private static void Click(Button button)
+    {
+        typeof(Button).GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(button, new object[] { EventArgs.Empty });
+    }
 
     private static void SetPrinting(BarcodeBatchForm form, bool printing)
     {
